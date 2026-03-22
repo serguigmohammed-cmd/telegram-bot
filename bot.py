@@ -8,14 +8,18 @@ TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
-APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"  # ⚠️ ضع App Secret بدون مسافة
+APP_SECRET = Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX# بدون مسافة
 TRACKING_ID = "orodmaroc"
+
+print("🚀 BOT STARTED...")
 
 # ================= SIGN FUNCTION =================
 def generate_sign(params):
     sorted_params = dict(sorted(params.items()))
     sign_str = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
-    return hashlib.sha256(sign_str.encode()).hexdigest().upper()
+    sign = hashlib.sha256(sign_str.encode()).hexdigest().upper()
+    print("🔐 SIGN:", sign)
+    return sign
 
 # ================= TELEGRAM =================
 def send_to_telegram(message):
@@ -26,9 +30,10 @@ def send_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
-        requests.post(url, data=data)
+        res = requests.post(url, data=data)
+        print("📤 Telegram Status:", res.status_code)
     except Exception as e:
-        print("Telegram Error:", e)
+        print("❌ Telegram Error:", e)
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -37,7 +42,7 @@ def get_products():
     params = {
         "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": str(int(time.time() * 1000)),  # ✅ تصحيح مهم
         "format": "json",
         "v": "2.0",
         "keywords": "smart gadgets",
@@ -48,13 +53,19 @@ def get_products():
     # 🔥 توليد التوقيع
     params["sign"] = generate_sign(params)
 
+    print("📡 PARAMS:", params)
+
     try:
         response = requests.get(url, params=params)
+
+        print("🌐 STATUS:", response.status_code)
+        print("📥 RESPONSE:", response.text[:500])
+
         data = response.json()
-        print("API RESPONSE:", data)  # debug
         return data
+
     except Exception as e:
-        print("API Error:", e)
+        print("❌ API Error:", e)
         return None
 
 # ================= FILTER PRODUCTS =================
@@ -69,11 +80,14 @@ def select_best_product(data):
                 price = float(p.get("target_sale_price", 0))
                 orders = int(p.get("lastest_volume", 0))
 
-                # 🔥 شروط اختيار المنتج
+                # 🔥 فلترة ذكية
                 if price > 5 and orders > 20:
                     good_products.append(p)
-            except:
+
+            except Exception as e:
                 continue
+
+        print(f"📊 Found {len(good_products)} good products")
 
         if not good_products:
             return None
@@ -81,7 +95,7 @@ def select_best_product(data):
         return random.choice(good_products)
 
     except Exception as e:
-        print("Parse Error:", e)
+        print("❌ Parse Error:", e)
         return None
 
 # ================= FORMAT MESSAGE =================
@@ -106,20 +120,20 @@ def format_message(product):
 
 # ================= MAIN LOOP =================
 while True:
-    print("🚀 جاري جلب المنتجات...")
+    print("\n🔄 دورة جديدة...\n")
 
     data = get_products()
 
     if not data:
-        print("❌ لا يوجد رد من API")
-        time.sleep(60)
+        print("❌ API لم يرجع بيانات")
+        time.sleep(20)
         continue
 
     product = select_best_product(data)
 
     if not product:
         print("❌ لا يوجد منتج مناسب")
-        time.sleep(60)
+        time.sleep(20)
         continue
 
     msg = format_message(product)
@@ -128,5 +142,5 @@ while True:
 
     print("✅ تم النشر:", product.get("product_title"))
 
-    # ⏱️ كل ساعتين
+    # ⏱️ للتجربة فقط
     time.sleep(20)
