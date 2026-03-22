@@ -1,63 +1,78 @@
 import requests
 import time
 import random
+import hashlib
+import urllib.parse
 
-TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
+# Telegram
+TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "@orodmaroc"
 
-posts = [
-"""🔥 عرض اليوم 🇲🇦 جهاز قياس الضغط
-😱 بثمن خيالي!
+# AliExpress API
+APP_KEY = "PUT_YOUR_APP_KEY"
+APP_SECRET = "PUT_YOUR_APP_SECRET"
+TRACKING_ID = "PUT_YOUR_TRACKING_ID"
 
-✔ دقيق وسريع
-✔ سهل الاستعمال
-✔ مناسب للمنزل
+def get_products():
+    url = "https://api-sg.aliexpress.com/sync"
+    
+    params = {
+        "method": "aliexpress.affiliate.product.query",
+        "app_key": APP_KEY,
+        "sign_method": "sha256",
+        "timestamp": str(int(time.time() * 1000)),
+        "format": "json",
+        "v": "2.0",
+        "keywords": "gadget",
+        "sort": "SALE_PRICE_ASC",
+        "target_currency": "MAD",
+        "target_language": "AR",
+        "tracking_id": TRACKING_ID
+    }
 
-🚚 شحن مباشر للمغرب
-💸 تخفيض كبير
+    # توقيع الطلب (signature)
+    sorted_params = sorted(params.items())
+    sign_str = APP_SECRET + ''.join(f"{k}{v}" for k, v in sorted_params) + APP_SECRET
+    sign = hashlib.sha256(sign_str.encode()).hexdigest().upper()
+    params["sign"] = sign
+
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    try:
+        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
+        return products
+    except:
+        return []
+
+def format_post(product):
+    title = product.get("product_title", "منتج رائع")
+    price = product.get("target_sale_price", "??")
+    link = product.get("promotion_link", "")
+
+    return f"""🔥 عرض اليوم 🇲🇦
+
+{title[:80]}
+
+💸 السعر: {price} درهم
+🚚 شحن للمغرب
 
 🔗 اطلب الآن:
-https://s.click.aliexpress.com/e/رابطك""",
-
-"""📶 عندك مشكل في الويفي؟ 😤
-الحل هنا 👇
-
-🔥 جهاز تقوية إشارة WiFi
-✔ يغطي الدار كاملة
-✔ تركيب سهل
-✔ سرعة عالية
-
-💥 عرض محدود!
-
-🔗 اشتري الآن:
-https://s.click.aliexpress.com/e/رابطك""",
-
-"""⚡ كابل شحن سريع 🔥
-ما غاديش تبقى تسنى!
-
-✔ شحن سريع جدا
-✔ متوافق مع جميع الهواتف
-✔ جودة عالية 💯
-
-💸 ثمن رخيص بزاف
-
-🔗 خذو دابا:
-https://s.click.aliexpress.com/e/رابطك"""
-]
+{link}"""
 
 while True:
-    post = random.choice(posts)
+    products = get_products()
 
-    response = requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        data={
-            "chat_id": CHAT_ID,
-            "text": post
-        }
-    )
+    if products:
+        product = random.choice(products)
+        message = format_post(product)
 
-    # طباعة الحالة (باش تعرف واش خدم)
-    print(response.json())
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={
+                "chat_id": CHAT_ID,
+                "text": message
+            }
+        )
 
-    # كل ساعتين
     time.sleep(7200)
