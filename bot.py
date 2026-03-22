@@ -4,7 +4,7 @@ import random
 import hashlib
 
 # ================= CONFIG =================
-TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
+TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"  # ⚠️ بدل التوكن فوراً
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
@@ -24,17 +24,31 @@ def generate_sign(params):
     return hashlib.md5(sign_str.encode()).hexdigest().upper()
 
 # ================= TELEGRAM =================
-def send_photo(photo, caption):
+def send_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     try:
-        requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "caption": caption,
-            "parse_mode": "HTML"
-        }, files={"photo": requests.get(photo).content})
-    except:
-        print("❌ Telegram error")
+        response = requests.get(photo_url, timeout=10)
+
+        if response.status_code != 200:
+            print("❌ Image download failed")
+            return
+
+        res = requests.post(
+            url,
+            data={
+                "chat_id": CHAT_ID,
+                "caption": caption,
+                "parse_mode": "HTML"
+            },
+            files={"photo": ("image.jpg", response.content)},
+            timeout=15
+        )
+
+        print("📤 Telegram:", res.status_code, res.text)
+
+    except Exception as e:
+        print("❌ Telegram error:", e)
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -61,12 +75,19 @@ def get_products():
     params["sign"] = generate_sign(params)
 
     try:
-        return requests.get(url, params=params).json()
-    except:
+        res = requests.get(url, params=params, timeout=15)
+        print("🌐 API STATUS:", res.status_code)
+        print("📥 RAW:", res.text[:300])
+        return res.json()
+    except Exception as e:
+        print("❌ API Error:", e)
         return None
 
 # ================= AFFILIATE LINK =================
 def generate_link(product_url):
+    if not product_url:
+        return ""
+
     url = "https://api-sg.aliexpress.com/rest"
 
     params = {
@@ -83,15 +104,28 @@ def generate_link(product_url):
     params["sign"] = generate_sign(params)
 
     try:
-        res = requests.get(url, params=params).json()
-        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-    except:
-        return product_url
+        res = requests.get(url, params=params, timeout=15).json()
+
+        link = res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+
+        return link
+
+    except Exception as e:
+        print("❌ Link Error:", e)
+        return product_url  # fallback
 
 # ================= FILTER =================
 def pick_product(data):
     try:
-        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
+        products = data.get("aliexpress_affiliate_product_query_response", {}) \
+                      .get("resp_result", {}) \
+                      .get("result", {}) \
+                      .get("products", {}) \
+                      .get("product", [])
+
+        if not products:
+            print("❌ No products returned")
+            return None
 
         best = []
 
@@ -101,13 +135,16 @@ def pick_product(data):
                 orders = int(p.get("lastest_volume", 0))
                 pid = p.get("product_id")
 
-                if pid in used_products:
+                if not pid or pid in used_products:
                     continue
 
                 if 5 < price < 40 and orders > 200:
                     best.append(p)
+
             except:
                 continue
+
+        print(f"📊 Found {len(best)} good products")
 
         if not best:
             return None
@@ -117,10 +154,11 @@ def pick_product(data):
 
         return product
 
-    except:
+    except Exception as e:
+        print("❌ Parse Error:", e)
         return None
 
-# ================= AI TEXT =================
+# ================= TEXT =================
 def generate_text(product):
     title = product.get("product_title", "")[:60]
     price = product.get("target_sale_price", "")
@@ -130,11 +168,10 @@ def generate_text(product):
         "😱 هذا المنتج كيدير ضجة!",
         "🔥 الناس كاملين كيشريوه دابا!",
         "💥 عرض محدود!",
-        "🚀 ترند قوي 2026!"
+        "🚀 ترند قوي!"
     ]
 
-    return f"""
-{random.choice(hooks)}
+    return f"""{random.choice(hooks)}
 
 📦 {title}
 
@@ -142,14 +179,12 @@ def generate_text(product):
 📈 أكثر من {orders} طلب
 
 🚚 شحن للمغرب
-
-👇 اطلب بسرعة
 """
 
 # ================= MAIN =================
 def main():
     while True:
-        print("🔄 Searching...")
+        print("\n🔄 Searching...\n")
 
         data = get_products()
 
@@ -165,17 +200,22 @@ def main():
 
         image = product.get("product_main_image_url", "")
         normal_link = product.get("product_detail_url", "")
+
         aff_link = generate_link(normal_link)
 
         text = generate_text(product)
 
         caption = text + f'\n🛒 <a href="{aff_link}">اشتري الآن</a>'
 
-        send_photo(image, caption)
+        if image:
+            send_photo(image, caption)
+        else:
+            print("❌ No image found")
 
-        print("✅ Posted")
+        print("✅ Posted:", product.get("product_title"))
 
         time.sleep(POST_INTERVAL)
 
 # ================= RUN =================
-main()
+if __name__ == "__main__":
+    main()
