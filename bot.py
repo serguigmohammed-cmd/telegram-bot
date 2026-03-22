@@ -6,8 +6,8 @@ import os
 import logging
 
 # ================= CONFIG =================
-TOKEN = os.getenv("TOKEN")          # 🔐 من Secrets
-APP_SECRET = os.getenv("APP_SECRET")
+TOKEN = os.getenv("TOKEN")              # 🔐 من Secrets
+APP_SECRET = os.getenv("APP_SECRET")    # 🔐 من Secrets
 
 CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
@@ -16,13 +16,16 @@ TRACKING_ID = "orodmaroc"
 POST_INTERVAL = 600  # 10 دقائق
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (add it in Secrets)")
+    raise Exception("❌ TOKEN missing (set it in Secrets)")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (add it in Secrets)")
+    raise Exception("❌ APP_SECRET missing (set it in Secrets)")
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger()
+
+# ================= MEMORY =================
+used_ids = set()
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -31,45 +34,46 @@ def generate_sign(params):
     return hashlib.md5(sign_str.encode()).hexdigest().upper()
 
 # ================= TELEGRAM =================
-def send_photo(photo_url, caption):
+def send_photo(photo_url, caption, retries=2):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
-    try:
-        img = requests.get(photo_url, timeout=15)
+    for attempt in range(retries + 1):
+        try:
+            img = requests.get(photo_url, timeout=15)
+            if img.status_code != 200:
+                log.error(f"❌ Image download failed: {img.status_code}")
+                return False
 
-        if img.status_code != 200:
-            log.error(f"❌ Image download failed: {img.status_code}")
-            return False
+            res = requests.post(
+                url,
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                },
+                files={"photo": ("img.jpg", img.content)},
+                timeout=30
+            )
 
-        res = requests.post(
-            url,
-            data={
-                "chat_id": CHAT_ID,
-                "caption": caption,
-                "parse_mode": "HTML"
-            },
-            files={"photo": ("img.jpg", img.content)},
-            timeout=30
-        )
+            if res.status_code != 200:
+                log.error(f"❌ HTTP {res.status_code}: {res.text}")
+                time.sleep(2)
+                continue
 
-        # ✅ تحقق من HTTP
-        if res.status_code != 200:
-            log.error(f"❌ Telegram HTTP error: {res.status_code}")
-            log.error(res.text)
-            return False
+            data = res.json()
+            if not data.get("ok"):
+                log.error(f"❌ Telegram rejected: {data}")
+                time.sleep(2)
+                continue
 
-        # ✅ تحقق من API
-        data = res.json()
-        if not data.get("ok"):
-            log.error(f"❌ Telegram rejected: {data}")
-            return False
+            log.info("✅ Message sent")
+            return True
 
-        log.info("✅ Message sent")
-        return True
+        except Exception as e:
+            log.error(f"❌ Send error: {e}")
+            time.sleep(2)
 
-    except Exception as e:
-        log.error(f"❌ Telegram exception: {e}")
-        return False
+    return False
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -81,7 +85,11 @@ def get_products():
         "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": random.choice(["smart gadgets","kitchen tools","car accessories"]),
+        "keywords": random.choice([
+            "smart gadgets",
+            "kitchen tools",
+            "car accessories"
+        ]),
         "page_size": 10,
         "tracking_id": TRACKING_ID
     }
@@ -125,8 +133,7 @@ def generate_link(product_url):
 
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
 
-    except Exception as e:
-        log.error(f"❌ Link error: {e}")
+    except:
         return product_url
 
 # ================= FILTER =================
@@ -134,22 +141,30 @@ def pick_product(data):
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        valid = []
+        good = []
 
         for p in products:
             try:
+                pid = p.get("product_id")
+                if pid in used_ids:
+                    continue
+
                 price = float(p.get("target_sale_price", 0))
                 orders = int(p.get("lastest_volume", 0))
 
                 if 5 < price < 40 and orders > 100:
-                    valid.append(p)
+                    good.append(p)
+
             except:
                 continue
 
-        if not valid:
+        if not good:
             return None
 
-        return random.choice(valid)
+        product = random.choice(good)
+        used_ids.add(product.get("product_id"))
+
+        return product
 
     except Exception as e:
         log.error(f"❌ Parse error: {e}")
@@ -170,6 +185,7 @@ def main():
 
             product = pick_product(data)
             if not product:
+                log.warning("⚠️ No new product")
                 time.sleep(20)
                 continue
 
