@@ -13,16 +13,21 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 7200  # 2 hours
+POST_INTERVAL = 300  # 5 دقائق للتجربة
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (set in Secrets)")
+    raise Exception("❌ TOKEN missing")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (set in Secrets)")
+    raise Exception("❌ APP_SECRET missing")
 
 # ================= LOGGING =================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 log = logging.getLogger()
+
+log.info("🚀 BOT STARTED")
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -35,12 +40,14 @@ def send_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     try:
+        log.info("📥 Downloading image...")
         img = requests.get(photo_url, timeout=10)
 
         if img.status_code != 200:
-            log.error("❌ Image download failed")
+            log.error(f"❌ Image error: {img.status_code}")
             return False
 
+        log.info("📤 Sending to Telegram...")
         res = requests.post(
             url,
             data={
@@ -52,23 +59,23 @@ def send_photo(photo_url, caption):
             timeout=15
         )
 
-        # ✅ CHECK RESPONSE
+        log.info(f"📡 Telegram status: {res.status_code}")
+
         if res.status_code != 200:
-            log.error(f"❌ HTTP Error: {res.status_code}")
             log.error(res.text)
             return False
 
         data = res.json()
 
         if not data.get("ok"):
-            log.error(f"❌ Telegram rejected: {data}")
+            log.error(f"❌ Telegram رفض: {data}")
             return False
 
-        log.info("✅ Message sent")
+        log.info("✅ Message sent successfully")
         return True
 
     except Exception as e:
-        log.error(f"❌ Exception: {e}")
+        log.error(f"❌ Telegram error: {e}")
         return False
 
 # ================= GET PRODUCTS =================
@@ -86,23 +93,26 @@ def get_products():
             "kitchen tools",
             "car accessories"
         ]),
-        "page_size": 20,
+        "page_size": 10,
         "tracking_id": TRACKING_ID
     }
 
     params["sign"] = generate_sign(params)
 
     try:
+        log.info("🌐 Fetching products...")
         res = requests.get(url, params=params, timeout=15)
 
+        log.info(f"📡 API status: {res.status_code}")
+
         if res.status_code != 200:
-            log.error("❌ API error")
+            log.error("❌ API failed")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"❌ API exception: {e}")
+        log.error(f"❌ API error: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -125,68 +135,52 @@ def generate_link(product_url):
     params["sign"] = generate_sign(params)
 
     try:
-        res = requests.get(url, params=params, timeout=15)
-
-        if res.status_code != 200:
-            return product_url
-
-        data = res.json()
-
-        return data["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-
+        res = requests.get(url, params=params, timeout=15).json()
+        link = res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+        return link
     except:
         return product_url
 
 # ================= FILTER =================
 def pick_product(data):
     try:
-        products = data.get("aliexpress_affiliate_product_query_response", {}) \
-                      .get("resp_result", {}) \
-                      .get("result", {}) \
-                      .get("products", {}) \
-                      .get("product", [])
+        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
         valid = []
 
         for p in products:
-            try:
-                price = float(p.get("target_sale_price", 0))
-                orders = int(p.get("lastest_volume", 0))
+            price = float(p.get("target_sale_price", 0))
+            orders = int(p.get("lastest_volume", 0))
 
-                if 5 < price < 40 and orders > 200:
-                    valid.append(p)
-            except:
-                continue
+            if 5 < price < 40 and orders > 100:
+                valid.append(p)
+
+        log.info(f"📊 Found {len(valid)} good products")
 
         if not valid:
             return None
 
         return random.choice(valid)
 
-    except:
+    except Exception as e:
+        log.error(f"❌ Parse error: {e}")
         return None
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 Bot started")
-
-    # ⏳ avoid instant spam after restart
-    time.sleep(POST_INTERVAL)
-
     while True:
         log.info("🔄 New cycle")
 
         data = get_products()
 
         if not data:
-            time.sleep(60)
+            time.sleep(20)
             continue
 
         product = pick_product(data)
 
         if not product:
-            log.warning("⚠️ No product found")
-            time.sleep(60)
+            time.sleep(20)
             continue
 
         image = product.get("product_main_image_url", "")
@@ -195,7 +189,7 @@ def main():
         caption = f"""
 🔥 عرض اليوم 🇲🇦
 
-📦 {product.get("product_title","")[:70]}
+📦 {product.get("product_title","")[:60]}
 
 💰 {product.get("target_sale_price")} $
 📈 {product.get("lastest_volume")} طلب
