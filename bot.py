@@ -13,12 +13,12 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 600
+POST_INTERVAL = 7200  # كل ساعتين
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (add it in Secrets)")
+    raise Exception("❌ TOKEN missing")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (add it in Secrets)")
+    raise Exception("❌ APP_SECRET missing")
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -37,6 +37,10 @@ def send_message(photo, caption):
     try:
         img = requests.get(photo, timeout=10)
 
+        if img.status_code != 200:
+            log.error("❌ Image download failed")
+            return False
+
         res = requests.post(
             url,
             data={
@@ -48,9 +52,9 @@ def send_message(photo, caption):
             timeout=15
         )
 
-        # ✅ تحقق من النتيجة
         if res.status_code != 200:
             log.error(f"❌ HTTP Error: {res.status_code}")
+            log.error(res.text)
             return False
 
         data = res.json()
@@ -91,18 +95,18 @@ def get_products():
         res = requests.get(url, params=params, timeout=15)
 
         if res.status_code != 200:
-            log.error("❌ API error")
+            log.error("❌ API HTTP error")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"❌ API exception: {e}")
+        log.error(f"❌ API error: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
-def generate_link(url_product):
-    if not url_product:
+def generate_link(product_url):
+    if not product_url:
         return ""
 
     url = "https://api-sg.aliexpress.com/rest"
@@ -113,38 +117,50 @@ def generate_link(url_product):
         "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "source_values": url_product,
+        "source_values": product_url,
         "tracking_id": TRACKING_ID
     }
 
     params["sign"] = generate_sign(params)
 
     try:
-        res = requests.get(url, params=params, timeout=15).json()
+        res = requests.get(url, params=params, timeout=15)
 
-        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+        if res.status_code != 200:
+            return product_url
+
+        data = res.json()
+
+        return data["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
 
     except:
-        return url_product
+        return product_url
 
 # ================= FILTER =================
 def pick_product(data):
     try:
-        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
+        products = data.get("aliexpress_affiliate_product_query_response", {}) \
+                      .get("resp_result", {}) \
+                      .get("result", {}) \
+                      .get("products", {}) \
+                      .get("product", [])
 
-        valid = []
+        good = []
 
         for p in products:
-            price = float(p.get("target_sale_price", 0))
-            orders = int(p.get("lastest_volume", 0))
+            try:
+                price = float(p.get("target_sale_price", 0))
+                orders = int(p.get("lastest_volume", 0))
 
-            if 5 < price < 40 and orders > 200:
-                valid.append(p)
+                if 5 < price < 40 and orders > 200:
+                    good.append(p)
+            except:
+                continue
 
-        if not valid:
+        if not good:
             return None
 
-        return random.choice(valid)
+        return random.choice(good)
 
     except:
         return None
@@ -153,24 +169,31 @@ def pick_product(data):
 def main():
     log.info("🚀 Bot started")
 
+    # ⏳ ينتظر أولاً (باش ما ينشرش مباشرة)
+    log.info("⏳ Waiting before first post...")
+    time.sleep(POST_INTERVAL)
+
     while True:
+        log.info("🔄 New cycle")
+
         data = get_products()
 
         if not data:
-            time.sleep(30)
+            time.sleep(60)
             continue
 
         product = pick_product(data)
 
         if not product:
-            time.sleep(30)
+            log.warning("⚠️ No good product")
+            time.sleep(60)
             continue
 
         image = product.get("product_main_image_url", "")
         link = generate_link(product.get("product_detail_url", ""))
 
         caption = f"""
-🔥 عرض اليوم
+🔥 عرض اليوم 🇲🇦
 
 📦 {product.get("product_title","")[:70]}
 
@@ -180,7 +203,10 @@ def main():
 🛒 <a href="{link}">اشتري الآن</a>
 """
 
-        send_message(image, caption)
+        if image:
+            send_message(image, caption)
+        else:
+            log.warning("⚠️ No image")
 
         time.sleep(POST_INTERVAL)
 
