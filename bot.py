@@ -17,8 +17,8 @@ print("🔥 BOT IS STARTING...")
 def generate_sign(params):
     sorted_params = dict(sorted(params.items()))
     sign_str = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
-    sign = hashlib.sha256(sign_str.encode()).hexdigest().upper()
-    print("🔐 SIGN:", sign)
+sign = hashlib.md5(sign_str.encode()).hexdigest().upper()
+print("🔐 SIGN:", sign)
     return sign
 
 # ================= TELEGRAM =================
