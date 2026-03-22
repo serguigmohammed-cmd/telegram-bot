@@ -1,3 +1,9 @@
+import hashlib
+
+def generate_sign(params):
+    sorted_params = dict(sorted(params.items()))
+    sign_str = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
+    return hashlib.sha256(sign_str.encode()).hexdigest().upper()
 import requests
 import time
 import random
@@ -7,7 +13,7 @@ TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
-APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX "
+APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"
 TRACKING_ID = "orodmaroc"
 
 # ================= TELEGRAM =================
