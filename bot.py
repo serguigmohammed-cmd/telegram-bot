@@ -8,136 +8,136 @@ TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
-APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"  # بدون مسافة
+APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"
 TRACKING_ID = "orodmaroc"
 
-print("🔥 BOT IS STARTING...")
+POST_INTERVAL = 300  # كل 5 دقائق
 
-# ================= SIGN FUNCTION =================
+print("🚀 BOT STARTED...")
+
+# ================= SIGN =================
 def generate_sign(params):
     sorted_params = dict(sorted(params.items()))
     sign_str = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
-sign = hashlib.md5(sign_str.encode()).hexdigest().upper()
-print("🔐 SIGN:", sign)
-    return sign
+    return hashlib.md5(sign_str.encode()).hexdigest().upper()
 
 # ================= TELEGRAM =================
-def send_to_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def send_photo_to_telegram(photo, caption):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+
     data = {
         "chat_id": CHAT_ID,
-        "text": message,
+        "caption": caption,
         "parse_mode": "HTML"
     }
+
     try:
-        res = requests.post(url, data=data)
-        print("📤 Telegram Status:", res.status_code)
+        res = requests.post(url, data=data, files={"photo": requests.get(photo).content})
+        print("📤 Telegram:", res.status_code)
     except Exception as e:
         print("❌ Telegram Error:", e)
 
 # ================= GET PRODUCTS =================
 def get_products():
-url = "https://api-sg.aliexpress.com/rest"
+    url = "https://api-sg.aliexpress.com/rest"
+
     params = {
         "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
-        "timestamp": str(int(time.time() * 1000)),  # ✅ تصحيح مهم
+        "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": "smart gadgets",
-        "page_size": 10,
+        "keywords": random.choice([
+            "smart gadgets",
+            "kitchen tools",
+            "car accessories",
+            "home decor",
+            "tech gadgets"
+        ]),
+        "page_size": 20,
         "tracking_id": TRACKING_ID
     }
 
     params["sign"] = generate_sign(params)
 
-    print("📡 PARAMS:", params)
-
     try:
         response = requests.get(url, params=params)
-
-        print("🌐 STATUS:", response.status_code)
-        print("📥 RESPONSE:", response.text[:500])
-
         return response.json()
-
-    except Exception as e:
-        print("❌ API Error:", e)
+    except:
         return None
 
-# ================= FILTER PRODUCTS =================
+# ================= FILTER =================
 def select_best_product(data):
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        good_products = []
+        best = []
 
         for p in products:
             try:
                 price = float(p.get("target_sale_price", 0))
                 orders = int(p.get("lastest_volume", 0))
 
-                if price > 5 and orders > 20:
-                    good_products.append(p)
-
+                if 5 < price < 50 and orders > 100:
+                    best.append(p)
             except:
                 continue
 
-        print(f"📊 Found {len(good_products)} good products")
-
-        if not good_products:
+        if not best:
             return None
 
-        return random.choice(good_products)
+        return random.choice(best)
 
-    except Exception as e:
-        print("❌ Parse Error:", e)
+    except:
         return None
 
-# ================= FORMAT MESSAGE =================
-def format_message(product):
-    title = product.get("product_title", "منتج رائع")
+# ================= FORMAT =================
+def format_caption(product):
+    title = product.get("product_title", "")[:80]
     price = product.get("target_sale_price", "")
-    link = product.get("promotion_link", "")
+    link = product.get("promotion_link") or product.get("product_detail_url", "")
+    orders = product.get("lastest_volume", "0")
 
     return f"""
-🔥 <b>عرض اليوم 🇲🇦</b>
+🔥 <b>عرض خاص اليوم 🇲🇦</b>
 
-📦 {title[:100]}
+📦 {title}
 
 💰 السعر: {price} $
+📈 طلبوه: {orders} مرة
 
-🚚 شحن مباشر للمغرب
+🚚 شحن للمغرب
 
-🔗 <a href="{link}">اطلب الآن</a>
+🛒 <a href="{link}">اطلب الآن</a>
 """
 
 # ================= MAIN =================
 def main():
     while True:
-        print("\n🔄 دورة جديدة...\n")
+        print("\n🔄 New Cycle...\n")
 
         data = get_products()
 
         if not data:
-            print("❌ API لم يرجع بيانات")
-            time.sleep(20)
+            print("❌ API Error")
+            time.sleep(30)
             continue
 
         product = select_best_product(data)
 
         if not product:
-            print("❌ لا يوجد منتج مناسب")
-            time.sleep(20)
+            print("❌ No good product")
+            time.sleep(30)
             continue
 
-        msg = format_message(product)
+        image = product.get("product_main_image_url", "")
+        caption = format_caption(product)
 
-        send_to_telegram(msg)
+        send_photo_to_telegram(image, caption)
 
-        print("✅ تم النشر:", product.get("product_title"))
+        print("✅ Posted:", product.get("product_title"))
 
-        time.sleep(20)  # للتجربة
+        time.sleep(POST_INTERVAL)
 
 # ================= RUN =================
 if __name__ == "__main__":
