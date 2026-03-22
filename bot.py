@@ -16,9 +16,9 @@ TRACKING_ID = "orodmaroc"
 POST_INTERVAL = 7200  # 2 hours
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing")
+    raise Exception("❌ TOKEN missing (set in Secrets)")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing")
+    raise Exception("❌ APP_SECRET missing (set in Secrets)")
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -52,6 +52,7 @@ def send_photo(photo_url, caption):
             timeout=15
         )
 
+        # ✅ CHECK RESPONSE
         if res.status_code != 200:
             log.error(f"❌ HTTP Error: {res.status_code}")
             log.error(res.text)
@@ -67,7 +68,7 @@ def send_photo(photo_url, caption):
         return True
 
     except Exception as e:
-        log.error(f"❌ Error: {e}")
+        log.error(f"❌ Exception: {e}")
         return False
 
 # ================= GET PRODUCTS =================
@@ -169,7 +170,7 @@ def pick_product(data):
 def main():
     log.info("🚀 Bot started")
 
-    # ⏳ wait before first post
+    # ⏳ avoid instant spam after restart
     time.sleep(POST_INTERVAL)
 
     while True:
