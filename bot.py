@@ -13,21 +13,16 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 300  # 5 دقائق للتجربة
+POST_INTERVAL = 600  # 10 دقائق
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing")
+    raise Exception("❌ TOKEN missing (add in Secrets)")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing")
+    raise Exception("❌ APP_SECRET missing (add in Secrets)")
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger()
-
-log.info("🚀 BOT STARTED")
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -40,14 +35,12 @@ def send_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     try:
-        log.info("📥 Downloading image...")
         img = requests.get(photo_url, timeout=10)
 
         if img.status_code != 200:
-            log.error(f"❌ Image error: {img.status_code}")
+            log.error("❌ Image download failed")
             return False
 
-        log.info("📤 Sending to Telegram...")
         res = requests.post(
             url,
             data={
@@ -59,23 +52,23 @@ def send_photo(photo_url, caption):
             timeout=15
         )
 
-        log.info(f"📡 Telegram status: {res.status_code}")
-
+        # ✅ CHECK RESPONSE
         if res.status_code != 200:
+            log.error(f"❌ HTTP error: {res.status_code}")
             log.error(res.text)
             return False
 
         data = res.json()
 
         if not data.get("ok"):
-            log.error(f"❌ Telegram رفض: {data}")
+            log.error(f"❌ Telegram rejected: {data}")
             return False
 
-        log.info("✅ Message sent successfully")
+        log.info("✅ Message sent")
         return True
 
     except Exception as e:
-        log.error(f"❌ Telegram error: {e}")
+        log.error(f"❌ Telegram exception: {e}")
         return False
 
 # ================= GET PRODUCTS =================
@@ -88,11 +81,7 @@ def get_products():
         "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": random.choice([
-            "smart gadgets",
-            "kitchen tools",
-            "car accessories"
-        ]),
+        "keywords": random.choice(["smart gadgets","kitchen tools","car accessories"]),
         "page_size": 10,
         "tracking_id": TRACKING_ID
     }
@@ -100,19 +89,16 @@ def get_products():
     params["sign"] = generate_sign(params)
 
     try:
-        log.info("🌐 Fetching products...")
         res = requests.get(url, params=params, timeout=15)
 
-        log.info(f"📡 API status: {res.status_code}")
-
         if res.status_code != 200:
-            log.error("❌ API failed")
+            log.error("❌ API error")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"❌ API error: {e}")
+        log.error(f"❌ API exception: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -136,57 +122,59 @@ def generate_link(product_url):
 
     try:
         res = requests.get(url, params=params, timeout=15).json()
-        link = res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-        return link
+
+        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+
     except:
-        return product_url
+        return product_url  # fallback
 
 # ================= FILTER =================
 def pick_product(data):
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        valid = []
+        good = []
 
         for p in products:
-            price = float(p.get("target_sale_price", 0))
-            orders = int(p.get("lastest_volume", 0))
+            try:
+                price = float(p.get("target_sale_price", 0))
+                orders = int(p.get("lastest_volume", 0))
 
-            if 5 < price < 40 and orders > 100:
-                valid.append(p)
+                if 5 < price < 40 and orders > 100:
+                    good.append(p)
+            except:
+                continue
 
-        log.info(f"📊 Found {len(valid)} good products")
-
-        if not valid:
+        if not good:
             return None
 
-        return random.choice(valid)
+        return random.choice(good)
 
-    except Exception as e:
-        log.error(f"❌ Parse error: {e}")
+    except:
         return None
 
 # ================= MAIN =================
 def main():
+    log.info("🚀 Bot started")
+
     while True:
-        log.info("🔄 New cycle")
+        try:
+            log.info("🔄 New cycle")
 
-        data = get_products()
+            data = get_products()
+            if not data:
+                time.sleep(20)
+                continue
 
-        if not data:
-            time.sleep(20)
-            continue
+            product = pick_product(data)
+            if not product:
+                time.sleep(20)
+                continue
 
-        product = pick_product(data)
+            image = product.get("product_main_image_url", "")
+            link = generate_link(product.get("product_detail_url", ""))
 
-        if not product:
-            time.sleep(20)
-            continue
-
-        image = product.get("product_main_image_url", "")
-        link = generate_link(product.get("product_detail_url", ""))
-
-        caption = f"""
+            caption = f"""
 🔥 عرض اليوم 🇲🇦
 
 📦 {product.get("product_title","")[:60]}
@@ -197,10 +185,14 @@ def main():
 🛒 <a href="{link}">اشتري الآن</a>
 """
 
-        if image:
-            send_photo(image, caption)
+            if image:
+                send_photo(image, caption)
 
-        time.sleep(POST_INTERVAL)
+            time.sleep(POST_INTERVAL)
+
+        except Exception as e:
+            log.error(f"🔥 LOOP ERROR: {e}")
+            time.sleep(30)
 
 # ================= RUN =================
 if __name__ == "__main__":
