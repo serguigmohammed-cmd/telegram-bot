@@ -2,7 +2,7 @@ import requests
 import time
 import random
 
-TOKEN = "8784580909:AAHZ8B-K_DplvsKuJquLGuZzE_ZCLgemRPI"
+TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
 
 posts = [
