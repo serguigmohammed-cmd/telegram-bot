@@ -3,6 +3,7 @@ import time
 import random
 import hashlib
 import os
+import logging
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
@@ -12,7 +13,7 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 600
+POST_INTERVAL = 600  # 10 دقائق
 
 if not TOKEN:
     raise Exception("❌ TOKEN missing (add it in Secrets)")
@@ -20,7 +21,14 @@ if not TOKEN:
 if not APP_SECRET:
     raise Exception("❌ APP_SECRET missing (add it in Secrets)")
 
-print("🚀 BOT STARTED (SECURE MODE)")
+# ================= LOGGING =================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+log = logging.getLogger(__name__)
+
+log.info("🚀 BOT STARTED (SECURE MODE)")
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -29,46 +37,53 @@ def generate_sign(params):
     return hashlib.md5(sign_str.encode()).hexdigest().upper()
 
 # ================= TELEGRAM =================
-def send_photo(photo_url, caption):
+def send_photo(photo_url, caption, retries=3):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
-    try:
-        img = requests.get(photo_url, timeout=10)
+    for attempt in range(1, retries + 1):
+        try:
+            img = requests.get(photo_url, timeout=10)
 
-        if img.status_code != 200:
-            print(f"❌ Image download failed: {img.status_code}")
-            return False
+            if img.status_code != 200:
+                log.error(f"❌ Image download failed: {img.status_code}")
+                return False
 
-        res = requests.post(
-            url,
-            data={
-                "chat_id": CHAT_ID,
-                "caption": caption,
-                "parse_mode": "HTML"
-            },
-            files={"photo": ("image.jpg", img.content)},
-            timeout=15
-        )
+            res = requests.post(
+                url,
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                },
+                files={"photo": ("image.jpg", img.content)},
+                timeout=15
+            )
 
-        # ✅ CHECK TELEGRAM RESPONSE
-        if res.status_code != 200:
-            print(f"❌ Telegram HTTP error: {res.status_code}")
-            print(res.text)
-            return False
+            if res.status_code != 200:
+                log.error(f"❌ Telegram HTTP {res.status_code}: {res.text}")
+                time.sleep(2)
+                continue
 
-        data = res.json()
+            data = res.json()
 
-        if not data.get("ok"):
-            print("❌ Telegram API rejected message:")
-            print(data)
-            return False
+            if not data.get("ok"):
+                log.error(f"❌ Telegram API rejected: {data}")
+                time.sleep(2)
+                continue
 
-        print("✅ Message sent")
-        return True
+            log.info("✅ Message sent successfully")
+            return True
 
-    except Exception as e:
-        print("❌ Telegram Exception:", e)
-        return False
+        except requests.exceptions.RequestException as e:
+            log.error(f"❌ Network error: {e}")
+            time.sleep(2)
+
+        except Exception as e:
+            log.error(f"❌ Unexpected error: {e}")
+            time.sleep(2)
+
+    log.error("❌ Failed after retries")
+    return False
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -96,18 +111,16 @@ def get_products():
     try:
         res = requests.get(url, params=params, timeout=15)
 
-        print("🌐 API Status:", res.status_code)
+        log.info(f"🌐 API Status: {res.status_code}")
 
         if res.status_code != 200:
-            print("❌ API HTTP error")
+            log.error("❌ API HTTP error")
             return None
 
-        data = res.json()
-
-        return data
+        return res.json()
 
     except Exception as e:
-        print("❌ API Exception:", e)
+        log.error(f"❌ API Exception: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -134,7 +147,7 @@ def generate_link(product_url):
         res = requests.get(url, params=params, timeout=15)
 
         if res.status_code != 200:
-            print("❌ Link HTTP error")
+            log.error("❌ Link HTTP error")
             return product_url
 
         data = res.json()
@@ -144,7 +157,7 @@ def generate_link(product_url):
         return link
 
     except Exception as e:
-        print("❌ Affiliate link error:", e)
+        log.error(f"❌ Affiliate link error: {e}")
         return product_url
 
 # ================= FILTER =================
@@ -157,7 +170,7 @@ def pick_product(data):
                       .get("product", [])
 
         if not products:
-            print("❌ No products found")
+            log.warning("⚠️ No products found")
             return None
 
         good = []
@@ -173,7 +186,7 @@ def pick_product(data):
             except:
                 continue
 
-        print(f"📊 Found {len(good)} good products")
+        log.info(f"📊 Found {len(good)} good products")
 
         if not good:
             return None
@@ -181,7 +194,7 @@ def pick_product(data):
         return random.choice(good)
 
     except Exception as e:
-        print("❌ Parse error:", e)
+        log.error(f"❌ Parse error: {e}")
         return None
 
 # ================= TEXT =================
@@ -209,7 +222,7 @@ def generate_text(product):
 
 # ================= TEST =================
 def test_telegram():
-    print("🧪 Testing Telegram...")
+    log.info("🧪 Testing Telegram...")
     return send_photo(
         "https://ae01.alicdn.com/kf/Sample.jpg",
         "✅ Bot is working"
@@ -218,11 +231,11 @@ def test_telegram():
 # ================= MAIN =================
 def main():
     if not test_telegram():
-        print("❌ Telegram test failed")
+        log.error("❌ Telegram test failed — stopping bot")
         return
 
     while True:
-        print("\n🔄 New cycle...\n")
+        log.info("🔄 New cycle...")
 
         data = get_products()
 
@@ -248,7 +261,10 @@ def main():
             success = send_photo(image, caption)
 
             if not success:
-                print("⚠️ Failed to send post")
+                log.warning("⚠️ Failed to send post")
+
+        else:
+            log.warning("⚠️ No image found")
 
         time.sleep(POST_INTERVAL)
 
