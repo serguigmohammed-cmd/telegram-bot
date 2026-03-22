@@ -2,77 +2,98 @@ import requests
 import time
 import random
 import hashlib
+import hmac
 import urllib.parse
+from datetime import datetime
 
-# Telegram
-TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
+# ================== CONFIG ==================
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 CHAT_ID = "@orodmaroc"
 
-# AliExpress API
-APP_KEY = "PUT_YOUR_APP_KEY"
-APP_SECRET = "PUT_YOUR_APP_SECRET"
-TRACKING_ID = "PUT_YOUR_TRACKING_ID"
+APP_KEY = "YOUR_APP_KEY"
+APP_SECRET = "YOUR_APP_SECRET"
+TRACKING_ID = "YOUR_TRACKING_ID"
 
+# ================== TELEGRAM ==================
+def send_to_telegram(text, image=None):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto" if image else f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    
+    data = {
+        "chat_id": CHAT_ID,
+        "caption" if image else "text": text,
+        "parse_mode": "HTML"
+    }
+
+    if image:
+        data["photo"] = image
+
+    requests.post(url, data=data)
+
+# ================== GET PRODUCTS ==================
 def get_products():
     url = "https://api-sg.aliexpress.com/sync"
-    
+
     params = {
-        "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
+        "method": "aliexpress.affiliate.product.query",
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "sign_method": "sha256",
-        "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": "gadget",
-        "sort": "SALE_PRICE_ASC",
-        "target_currency": "MAD",
-        "target_language": "AR",
+        "keywords": "gadgets",
+        "page_no": 1,
+        "page_size": 5,
         "tracking_id": TRACKING_ID
     }
 
-    # توقيع الطلب (signature)
-    sorted_params = sorted(params.items())
-    sign_str = APP_SECRET + ''.join(f"{k}{v}" for k, v in sorted_params) + APP_SECRET
+    # توليد التوقيع
+    sorted_params = dict(sorted(params.items()))
+    sign_str = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
     sign = hashlib.sha256(sign_str.encode()).hexdigest().upper()
+
     params["sign"] = sign
 
     response = requests.get(url, params=params)
     data = response.json()
 
     try:
-        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
-        return products
+        return data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
     except:
         return []
 
+# ================== FORMAT POST ==================
 def format_post(product):
     title = product.get("product_title", "منتج رائع")
-    price = product.get("target_sale_price", "??")
+    price = product.get("target_sale_price", "")
+    discount = product.get("discount", "")
     link = product.get("promotion_link", "")
+    image = product.get("product_main_image_url", "")
 
-    return f"""🔥 عرض اليوم 🇲🇦
+    text = f"""🔥 عرض اليوم 🇲🇦
 
-{title[:80]}
+🛍️ {title}
 
-💸 السعر: {price} درهم
+💰 السعر: {price}
+🎯 تخفيض: {discount}
+
 🚚 شحن للمغرب
 
 🔗 اطلب الآن:
-{link}"""
+{link}
+"""
 
+    return text, image
+
+# ================== MAIN LOOP ==================
 while True:
     products = get_products()
 
     if products:
         product = random.choice(products)
-        message = format_post(product)
+        text, image = format_post(product)
+        send_to_telegram(text, image)
 
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": message
-            }
-        )
+    else:
+        send_to_telegram("⚠️ لم يتم جلب منتجات")
 
-    time.sleep(7200)
+    time.sleep(7200)  # كل ساعتين
