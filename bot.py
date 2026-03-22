@@ -4,7 +4,7 @@ import random
 import hashlib
 
 # ================= CONFIG =================
-TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"  # ⚠️ بدل التوكن فوراً
+TOKEN = "8784580909:AAGfB5zAWaWuLwOeYDqgfQK0qPg_kw3OY4s"  # ⚠️ بدل التوكن فوراً
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
