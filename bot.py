@@ -8,10 +8,10 @@ TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
-APP_SECRET = Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX# بدون مسافة
+APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"  # بدون مسافة
 TRACKING_ID = "orodmaroc"
 
-print("🚀 BOT STARTED...")
+print("🔥 BOT IS STARTING...")
 
 # ================= SIGN FUNCTION =================
 def generate_sign(params):
@@ -50,7 +50,6 @@ def get_products():
         "tracking_id": TRACKING_ID
     }
 
-    # 🔥 توليد التوقيع
     params["sign"] = generate_sign(params)
 
     print("📡 PARAMS:", params)
@@ -61,8 +60,7 @@ def get_products():
         print("🌐 STATUS:", response.status_code)
         print("📥 RESPONSE:", response.text[:500])
 
-        data = response.json()
-        return data
+        return response.json()
 
     except Exception as e:
         print("❌ API Error:", e)
@@ -80,11 +78,10 @@ def select_best_product(data):
                 price = float(p.get("target_sale_price", 0))
                 orders = int(p.get("lastest_volume", 0))
 
-                # 🔥 فلترة ذكية
                 if price > 5 and orders > 20:
                     good_products.append(p)
 
-            except Exception as e:
+            except:
                 continue
 
         print(f"📊 Found {len(good_products)} good products")
@@ -104,7 +101,7 @@ def format_message(product):
     price = product.get("target_sale_price", "")
     link = product.get("promotion_link", "")
 
-    message = f"""
+    return f"""
 🔥 <b>عرض اليوم 🇲🇦</b>
 
 📦 {title[:100]}
@@ -116,31 +113,33 @@ def format_message(product):
 🔗 <a href="{link}">اطلب الآن</a>
 """
 
-    return message
+# ================= MAIN =================
+def main():
+    while True:
+        print("\n🔄 دورة جديدة...\n")
 
-# ================= MAIN LOOP =================
-while True:
-    print("\n🔄 دورة جديدة...\n")
+        data = get_products()
 
-    data = get_products()
+        if not data:
+            print("❌ API لم يرجع بيانات")
+            time.sleep(20)
+            continue
 
-    if not data:
-        print("❌ API لم يرجع بيانات")
-        time.sleep(20)
-        continue
+        product = select_best_product(data)
 
-    product = select_best_product(data)
+        if not product:
+            print("❌ لا يوجد منتج مناسب")
+            time.sleep(20)
+            continue
 
-    if not product:
-        print("❌ لا يوجد منتج مناسب")
-        time.sleep(20)
-        continue
+        msg = format_message(product)
 
-    msg = format_message(product)
+        send_to_telegram(msg)
 
-    send_to_telegram(msg)
+        print("✅ تم النشر:", product.get("product_title"))
 
-    print("✅ تم النشر:", product.get("product_title"))
+        time.sleep(20)  # للتجربة
 
-    # ⏱️ للتجربة فقط
-    time.sleep(20)
+# ================= RUN =================
+if __name__ == "__main__":
+    main()
