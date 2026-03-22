@@ -40,7 +40,7 @@ def send_photo_to_telegram(photo, caption):
 # ================= GET PRODUCTS =================
 def get_products():
     url = "https://api-sg.aliexpress.com/rest"
-
+print(response.text)
     params = {
         "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
