@@ -21,10 +21,7 @@ if not APP_SECRET:
     raise Exception("❌ APP_SECRET missing (add it in Secrets)")
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger()
 
 # ================= SIGN =================
@@ -38,7 +35,7 @@ def send_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     try:
-        img = requests.get(photo_url, timeout=10)
+        img = requests.get(photo_url, timeout=15)
 
         if img.status_code != 200:
             log.error(f"❌ Image download failed: {img.status_code}")
@@ -52,22 +49,22 @@ def send_photo(photo_url, caption):
                 "parse_mode": "HTML"
             },
             files={"photo": ("img.jpg", img.content)},
-            timeout=15
+            timeout=30
         )
 
-        # ✅ تحقق من الرد
+        # ✅ تحقق من HTTP
         if res.status_code != 200:
             log.error(f"❌ Telegram HTTP error: {res.status_code}")
             log.error(res.text)
             return False
 
+        # ✅ تحقق من API
         data = res.json()
-
         if not data.get("ok"):
             log.error(f"❌ Telegram rejected: {data}")
             return False
 
-        log.info("✅ Message sent successfully")
+        log.info("✅ Message sent")
         return True
 
     except Exception as e:
@@ -84,11 +81,7 @@ def get_products():
         "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": random.choice([
-            "smart gadgets",
-            "kitchen tools",
-            "car accessories"
-        ]),
+        "keywords": random.choice(["smart gadgets","kitchen tools","car accessories"]),
         "page_size": 10,
         "tracking_id": TRACKING_ID
     }
@@ -96,7 +89,7 @@ def get_products():
     params["sign"] = generate_sign(params)
 
     try:
-        res = requests.get(url, params=params, timeout=15)
+        res = requests.get(url, params=params, timeout=30)
 
         if res.status_code != 200:
             log.error("❌ API HTTP error")
@@ -128,7 +121,7 @@ def generate_link(product_url):
     params["sign"] = generate_sign(params)
 
     try:
-        res = requests.get(url, params=params, timeout=15).json()
+        res = requests.get(url, params=params, timeout=30).json()
 
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
 
@@ -139,13 +132,9 @@ def generate_link(product_url):
 # ================= FILTER =================
 def pick_product(data):
     try:
-        products = data.get("aliexpress_affiliate_product_query_response", {}) \
-                      .get("resp_result", {}) \
-                      .get("result", {}) \
-                      .get("products", {}) \
-                      .get("product", [])
+        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        good = []
+        valid = []
 
         for p in products:
             try:
@@ -153,14 +142,14 @@ def pick_product(data):
                 orders = int(p.get("lastest_volume", 0))
 
                 if 5 < price < 40 and orders > 100:
-                    good.append(p)
+                    valid.append(p)
             except:
                 continue
 
-        if not good:
+        if not valid:
             return None
 
-        return random.choice(good)
+        return random.choice(valid)
 
     except Exception as e:
         log.error(f"❌ Parse error: {e}")
