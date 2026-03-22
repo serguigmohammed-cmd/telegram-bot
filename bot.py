@@ -2,151 +2,106 @@ import requests
 import time
 import random
 
-# 🔐 بياناتك (عدّلها فقط هنا)
+# ================= CONFIG =================
 TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
 CHAT_ID = "@orodmaroc"
+
 APP_KEY = "530184"
+APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX "
 TRACKING_ID = "orodmaroc"
 
-# 🟢 جلب منتجات من AliExpress
+# ================= TELEGRAM =================
+def send_to_telegram(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    requests.post(url, data=data)
+
+# ================= GET PRODUCTS =================
 def get_products():
     url = "https://api-sg.aliexpress.com/sync"
 
     params = {
         "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
-        "format": "json",
         "sign_method": "sha256",
-        "keywords": "gadgets",  # 🔥 تقدر تبدلها
-        "target_currency": "MAD",
-        "target_language": "AR",
-        "page_size": 10
+        "timestamp": int(time.time() * 1000),
+        "format": "json",
+        "v": "2.0",
+        "keywords": "smart gadgets",
+        "page_size": 10,
+        "fields": "product_title,product_main_image_url,sale_price,product_detail_url,product_id,commission_rate"
     }
 
     try:
-        res = requests.get(url, params=params)
-        data = res.json()
-        return data.get("result", {}).get("products", [])
-    except Exception as e:
-        print("❌ API Error:", e)
-        return []
+        response = requests.get(url, params=params)
+        data = response.json()
+        return data
+    except:
+        return None
 
-# 🧠 اختيار منتج جيد
-def pick_product(products):
-    good = []
+# ================= FILTER WINNING PRODUCTS =================
+def select_best_product(data):
+    try:
+        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-    for p in products:
-        try:
-            price = float(p.get("target_sale_price", 0))
-            orders = int(p.get("orders_count", 0))
+        # فلترة المنتجات
+        good_products = []
 
-            if price < 200 and orders > 20:
-                good.append(p)
-        except:
-            continue
+        for p in products:
+            try:
+                price = float(p.get("sale_price", 0))
+                commission = float(p.get("commission_rate", 0))
 
-    return random.choice(good) if good else None
+                # شروط الربح
+                if price > 5 and commission > 5:
+                    good_products.append(p)
+            except:
+                continue
 
-# ✍️ نصوص جاهزة
-templates = [
-"""🔥 عرض اليوم 🇲🇦
-😱 منتج غادي يعجبك بزاف!
+        if not good_products:
+            return None
 
-✔ جودة عالية
-✔ سهل الاستعمال
-✔ مفيد يوميًا
+        return random.choice(good_products)
 
-💸 ثمن مناسب
+    except:
+        return None
 
-🚚 شحن مباشر للمغرب
+# ================= FORMAT MESSAGE =================
+def format_message(product):
+    title = product.get("product_title", "منتج رائع")
+    price = product.get("sale_price", "")
+    link = product.get("product_detail_url", "")
 
-🔗 اطلب الآن:
-{link}
-""",
+    affiliate_link = f"{link}&aff_fcid={TRACKING_ID}"
 
-"""⚡ فرصة ما تتفوتش!
-🔥 منتج مطلوب بزاف
+    message = f"""
+🔥 <b>عرض اليوم</b>
 
-✔ عملي وسريع
-✔ جودة ممتازة
+📦 {title}
 
-💰 ثمن قليل
+💰 السعر: {price} $
 
-📦 شحن للمغرب 🇲🇦
+🚚 شحن للمغرب 🇲🇦
 
-🛒 الرابط:
-{link}
-""",
-
-"""🎯 حل بسيط لمشكل كبير!
-😎 منتج ذكي
-
-✔ تصميم رائع
-✔ سهل الاستخدام
-
-💸 سعر مغري
-
-🚚 توصيل متوفر
-
-🔗 شري دابا:
-{link}
+🔗 <a href="{affiliate_link}">اضغط هنا للشراء</a>
 """
-]
 
-# 🔗 إنشاء رابط أفلييت
-def make_link(link):
-    return f"{link}&aff_trace_key={TRACKING_ID}"
+    return message
 
-# 📤 إرسال إلى تيليجرام
-def send(text, image):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-
-    data = {
-        "chat_id": CHAT_ID,
-        "caption": text,
-        "photo": image
-    }
-
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print("❌ Telegram Error:", e)
-
-# 🔁 تشغيل مستمر
+# ================= MAIN LOOP =================
 while True:
-    print("🚀 جاري جلب المنتجات...")
+    data = get_products()
 
-    products = get_products()
+    if data:
+        product = select_best_product(data)
 
-    if not products:
-        print("❌ لا يوجد منتجات")
-        time.sleep(60)
-        continue
+        if product:
+            msg = format_message(product)
+            send_to_telegram(msg)
+            print("Posted:", product.get("product_title"))
 
-    product = pick_product(products)
-
-    if not product:
-        print("❌ لا يوجد منتج مناسب")
-        time.sleep(60)
-        continue
-
-    try:
-        title = product.get("product_title", "")
-        price = product.get("target_sale_price", "")
-        image = product.get("product_main_image_url", "")
-        link = product.get("promotion_link", "")
-
-        affiliate_link = make_link(link)
-
-        template = random.choice(templates)
-        text = template.format(link=affiliate_link)
-
-        send(text, image)
-
-        print("✅ تم النشر:", title)
-
-    except Exception as e:
-        print("❌ خطأ:", e)
-
-    # ⏱️ كل ساعتين
-    time.sleep(7200)
+    time.sleep(7200)  # كل ساعتين
