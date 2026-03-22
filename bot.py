@@ -13,18 +13,15 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 7200  # 2 ساعات
+POST_INTERVAL = 7200  # 2 hours
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (add in Secrets)")
+    raise Exception("❌ TOKEN missing")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (add in Secrets)")
+    raise Exception("❌ APP_SECRET missing")
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 log = logging.getLogger()
 
 # ================= SIGN =================
@@ -41,7 +38,7 @@ def send_photo(photo_url, caption):
         img = requests.get(photo_url, timeout=10)
 
         if img.status_code != 200:
-            log.error(f"❌ Image download failed: {img.status_code}")
+            log.error("❌ Image download failed")
             return False
 
         res = requests.post(
@@ -51,27 +48,26 @@ def send_photo(photo_url, caption):
                 "caption": caption,
                 "parse_mode": "HTML"
             },
-            files={"photo": ("image.jpg", img.content)},
+            files={"photo": ("img.jpg", img.content)},
             timeout=15
         )
 
-        # ✅ تحقق من الرد
         if res.status_code != 200:
-            log.error(f"❌ Telegram HTTP error: {res.status_code}")
+            log.error(f"❌ HTTP Error: {res.status_code}")
             log.error(res.text)
             return False
 
         data = res.json()
 
         if not data.get("ok"):
-            log.error(f"❌ Telegram API rejected: {data}")
+            log.error(f"❌ Telegram rejected: {data}")
             return False
 
-        log.info("✅ Message sent successfully")
+        log.info("✅ Message sent")
         return True
 
     except Exception as e:
-        log.error(f"❌ Telegram error: {e}")
+        log.error(f"❌ Error: {e}")
         return False
 
 # ================= GET PRODUCTS =================
@@ -99,13 +95,13 @@ def get_products():
         res = requests.get(url, params=params, timeout=15)
 
         if res.status_code != 200:
-            log.error("❌ API HTTP error")
+            log.error("❌ API error")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"❌ API error: {e}")
+        log.error(f"❌ API exception: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -137,8 +133,7 @@ def generate_link(product_url):
 
         return data["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
 
-    except Exception as e:
-        log.error(f"❌ Link error: {e}")
+    except:
         return product_url
 
 # ================= FILTER =================
@@ -167,16 +162,14 @@ def pick_product(data):
 
         return random.choice(valid)
 
-    except Exception as e:
-        log.error(f"❌ Parse error: {e}")
+    except:
         return None
 
 # ================= MAIN =================
 def main():
     log.info("🚀 Bot started")
 
-    # ⏳ انتظار قبل أول نشر
-    log.info("⏳ Waiting before first post...")
+    # ⏳ wait before first post
     time.sleep(POST_INTERVAL)
 
     while True:
@@ -191,7 +184,7 @@ def main():
         product = pick_product(data)
 
         if not product:
-            log.warning("⚠️ No valid product")
+            log.warning("⚠️ No product found")
             time.sleep(60)
             continue
 
@@ -211,8 +204,6 @@ def main():
 
         if image:
             send_photo(image, caption)
-        else:
-            log.warning("⚠️ No image")
 
         time.sleep(POST_INTERVAL)
 
