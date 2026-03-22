@@ -129,4 +129,4 @@ while True:
     print("✅ تم النشر:", product.get("product_title"))
 
     # ⏱️ كل ساعتين
-    time.sleep(7200)
+    time.sleep(20)
