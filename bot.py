@@ -37,8 +37,7 @@ def send_to_telegram(message):
 
 # ================= GET PRODUCTS =================
 def get_products():
-    url = "https://api-sg.aliexpress.com/sync"
-
+url = "https://api-sg.aliexpress.com/rest"
     params = {
         "method": "aliexpress.affiliate.product.query",
         "app_key": APP_KEY,
