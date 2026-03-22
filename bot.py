@@ -2,20 +2,22 @@ import requests
 import time
 import random
 import hashlib
+import os
 
 # ================= CONFIG =================
-TOKEN = "8784580909:AAGfB5zAWaWuLwOeYDqgfQK0qPg_kw3OY4s"  # ⚠️ بدل التوكن فوراً
+TOKEN = os.getenv("TOKEN")
 CHAT_ID = "@orodmaroc"
 
 APP_KEY = "530184"
-APP_SECRET = "Eiyy8WsXvwGsVXhTyL2pxnuFRNwWo8UX"
+APP_SECRET = os.getenv("APP_SECRET")
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 600  # 10 دقائق
+POST_INTERVAL = 600
 
-used_products = set()
+if not TOKEN:
+    raise Exception("❌ TOKEN not found in environment variables")
 
-print("🚀 AUTO MONEY BOT STARTED")
+print("🚀 BOT STARTED SECURELY")
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -28,60 +30,42 @@ def send_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     try:
-        response = requests.get(photo_url, timeout=10)
+        img = requests.get(photo_url, timeout=10)
 
-        if response.status_code != 200:
-            print("❌ Image download failed")
-            return
+        if img.status_code != 200:
+            print("❌ Image download failed:", img.status_code)
+            return False
 
-        res = requests.post(
+        response = requests.post(
             url,
             data={
                 "chat_id": CHAT_ID,
                 "caption": caption,
                 "parse_mode": "HTML"
             },
-            files={"photo": ("image.jpg", response.content)},
+            files={"photo": ("image.jpg", img.content)},
             timeout=15
         )
 
-        print("📤 Telegram:", res.status_code, res.text)
+        # ✅ CHECK RESPONSE
+        if response.status_code != 200:
+            print("❌ Telegram HTTP Error:", response.status_code)
+            print(response.text)
+            return False
+
+        data = response.json()
+
+        if not data.get("ok"):
+            print("❌ Telegram API رفض الرسالة:")
+            print(data)
+            return False
+
+        print("✅ Message sent successfully")
+        return True
 
     except Exception as e:
-        print("❌ Telegram error:", e)
-
-# ================= GET PRODUCTS =================
-def get_products():
-    url = "https://api-sg.aliexpress.com/rest"
-
-    params = {
-        "method": "aliexpress.affiliate.product.query",
-        "app_key": APP_KEY,
-        "timestamp": str(int(time.time() * 1000)),
-        "format": "json",
-        "v": "2.0",
-        "keywords": random.choice([
-            "smart gadgets",
-            "car accessories",
-            "kitchen tools",
-            "home decor",
-            "fitness",
-            "beauty"
-        ]),
-        "page_size": 20,
-        "tracking_id": TRACKING_ID
-    }
-
-    params["sign"] = generate_sign(params)
-
-    try:
-        res = requests.get(url, params=params, timeout=15)
-        print("🌐 API STATUS:", res.status_code)
-        print("📥 RAW:", res.text[:300])
-        return res.json()
-    except Exception as e:
-        print("❌ API Error:", e)
-        return None
+        print("❌ Telegram Exception:", e)
+        return False
 
 # ================= AFFILIATE LINK =================
 def generate_link(product_url):
@@ -111,108 +95,27 @@ def generate_link(product_url):
         return link
 
     except Exception as e:
-        print("❌ Link Error:", e)
-        return product_url  # fallback
+        print("❌ Affiliate link error:", e)
+        return product_url
 
-# ================= FILTER =================
-def pick_product(data):
-    try:
-        products = data.get("aliexpress_affiliate_product_query_response", {}) \
-                      .get("resp_result", {}) \
-                      .get("result", {}) \
-                      .get("products", {}) \
-                      .get("product", [])
-
-        if not products:
-            print("❌ No products returned")
-            return None
-
-        best = []
-
-        for p in products:
-            try:
-                price = float(p.get("target_sale_price", 0))
-                orders = int(p.get("lastest_volume", 0))
-                pid = p.get("product_id")
-
-                if not pid or pid in used_products:
-                    continue
-
-                if 5 < price < 40 and orders > 200:
-                    best.append(p)
-
-            except:
-                continue
-
-        print(f"📊 Found {len(best)} good products")
-
-        if not best:
-            return None
-
-        product = random.choice(best)
-        used_products.add(product.get("product_id"))
-
-        return product
-
-    except Exception as e:
-        print("❌ Parse Error:", e)
-        return None
-
-# ================= TEXT =================
-def generate_text(product):
-    title = product.get("product_title", "")[:60]
-    price = product.get("target_sale_price", "")
-    orders = product.get("lastest_volume", "0")
-
-    hooks = [
-        "😱 هذا المنتج كيدير ضجة!",
-        "🔥 الناس كاملين كيشريوه دابا!",
-        "💥 عرض محدود!",
-        "🚀 ترند قوي!"
-    ]
-
-    return f"""{random.choice(hooks)}
-
-📦 {title}
-
-💰 فقط {price} $
-📈 أكثر من {orders} طلب
-
-🚚 شحن للمغرب
-"""
+# ================= SIMPLE TEST =================
+def test_telegram():
+    print("🧪 Testing Telegram...")
+    return send_photo(
+        "https://ae01.alicdn.com/kf/Sample.jpg",
+        "✅ Bot is working!"
+    )
 
 # ================= MAIN =================
 def main():
+    if not test_telegram():
+        print("❌ Telegram test failed — check token or permissions")
+        return
+
     while True:
-        print("\n🔄 Searching...\n")
+        print("🔄 Running...")
 
-        data = get_products()
-
-        if not data:
-            time.sleep(30)
-            continue
-
-        product = pick_product(data)
-
-        if not product:
-            time.sleep(30)
-            continue
-
-        image = product.get("product_main_image_url", "")
-        normal_link = product.get("product_detail_url", "")
-
-        aff_link = generate_link(normal_link)
-
-        text = generate_text(product)
-
-        caption = text + f'\n🛒 <a href="{aff_link}">اشتري الآن</a>'
-
-        if image:
-            send_photo(image, caption)
-        else:
-            print("❌ No image found")
-
-        print("✅ Posted:", product.get("product_title"))
+        # (هنا تحط logic ديال products ديالك)
 
         time.sleep(POST_INTERVAL)
 
