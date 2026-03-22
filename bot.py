@@ -1,159 +1,150 @@
 import requests
 import time
 import random
-import hashlib
-from datetime import datetime
 
-# ========= CONFIG =========
-TOKEN = "8784580909:AAGliHWx9aalI_mOjXhreZxGFgrxuodpDaw"
+# 🔐 بياناتك
+TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "@orodmaroc"
 
-APP_KEY = "YOUR_APP_KEY"
-APP_SECRET = "YOUR_APP_SECRET"
-TRACKING_ID = "YOUR_TRACKING_ID"
+ALIEXPRESS_APP_KEY = "PUT_API_KEY"
+ALIEXPRESS_APP_SECRET = "PUT_SECRET"
 
-sent_links = set()
+TRACKING_ID = "orodmaroc"
 
-# ========= TELEGRAM =========
-def send_post(text, image):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    data = {
-        "chat_id": CHAT_ID,
-        "photo": image,
-        "caption": text,
-        "parse_mode": "HTML"
-    }
-    requests.post(url, data=data)
+# 🧠 GPT (اختياري لكن مهم)
+OPENAI_API_KEY = "PUT_OPENAI_KEY"
 
-# ========= SIGN =========
-def sign(params):
-    sorted_params = dict(sorted(params.items()))
-    s = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
-    return hashlib.sha256(s.encode()).hexdigest().upper()
 
-# ========= GET PRODUCTS =========
+# 🟢 جلب منتجات من AliExpress
 def get_products():
     url = "https://api-sg.aliexpress.com/sync"
-
-    keywords_list = [
-        "kitchen tools",
-        "car accessories",
-        "smart gadgets",
-        "fitness",
-        "home improvement"
-    ]
-
+    
     params = {
-        "app_key": APP_KEY,
         "method": "aliexpress.affiliate.product.query",
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "sign_method": "sha256",
+        "app_key": ALIEXPRESS_APP_KEY,
         "format": "json",
-        "v": "2.0",
-        "keywords": random.choice(keywords_list),
-        "page_no": 1,
-        "page_size": 20,
-        "tracking_id": TRACKING_ID,
-        "sort": "LAST_VOLUME_DESC"  # الأكثر مبيعًا 🔥
+        "sign_method": "sha256",
+        "keywords": "gadgets",
+        "target_currency": "MAD",
+        "target_language": "AR",
+        "page_size": 10
     }
 
-    params["sign"] = sign(params)
-
     try:
-        res = requests.get(url, params=params).json()
-        return res["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        products = data.get("result", {}).get("products", [])
+        return products
+
     except:
         return []
 
-# ========= AI SCORE =========
-def score_product(p):
+
+# 🧠 اختيار منتج رابح
+def pick_winning_product(products):
+    good = []
+
+    for p in products:
+        try:
+            price = float(p["target_sale_price"])
+            orders = int(p.get("orders_count", 0))
+
+            if price < 200 and orders > 50:
+                good.append(p)
+        except:
+            continue
+
+    return random.choice(good) if good else None
+
+
+# 🤖 كتابة محتوى بالذكاء الاصطناعي
+def generate_text(title, price):
+    prompt = f"""
+    اكتب إعلان تسويقي احترافي باللهجة المغربية لمنتج:
+    {title}
+    السعر: {price} درهم
+
+    اجعله قصير + جذاب + فيه إيموجي + يدفع للشراء
+    """
+
     try:
-        price = float(p.get("target_sale_price", 0))
-        orders = int(p.get("lastest_volume", 0))
-        rating = float(p.get("evaluate_rate", 0))
+        res = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}]
+            }
+        )
 
-        score = 0
+        return res.json()["choices"][0]["message"]["content"]
 
-        if price < 30:
-            score += 2
-        if orders > 100:
-            score += 3
-        if rating >= 4.5:
-            score += 3
-
-        return score
     except:
-        return 0
+        return f"🔥 عرض قوي! {title} بثمن {price} درهم فقط!"
 
-# ========= PICK BEST =========
-def pick_winner(products):
-    scored = [(p, score_product(p)) for p in products]
-    scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    for p, s in scored:
-        link = p.get("promotion_link", "")
-        if link not in sent_links and s >= 5:
-            return p
+# 🔗 توليد رابط أفلييت
+def make_affiliate_link(link):
+    return f"{link}&aff_trace_key={TRACKING_ID}"
 
-    return None
 
-# ========= AI COPYWRITING =========
-def generate_caption(p):
-    title = p.get("product_title", "")
-    price = p.get("target_sale_price", "")
-    discount = p.get("discount", "")
-    link = p.get("promotion_link", "")
-    image = p.get("product_main_image_url", "")
+# 📤 إرسال إلى تيليجرام
+def send_to_telegram(text, image):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
 
-    hooks = [
-        "🔥 منتج عليه طلب كبير!",
-        "💥 الناس كاملين كيشريوه!",
-        "🚀 الأكثر مبيعًا الآن!",
-        "😱 عرض محدود!"
-    ]
+    data = {
+        "chat_id": CHAT_ID,
+        "caption": text,
+        "photo": image,
+        "parse_mode": "HTML"
+    }
 
-    benefits = [
-        "✔ جودة عالية",
-        "✔ سهل الاستعمال",
-        "✔ مفيد يوميًا",
-        "✔ تصميم رائع"
-    ]
+    requests.post(url, data=data)
 
-    caption = f"""
-{random.choice(hooks)} 🇲🇦
 
-🛍️ <b>{title}</b>
-
-{random.choice(benefits)}
-{random.choice(benefits)}
-
-💰 السعر: {price}$
-🎯 تخفيض: {discount}
-
-🚚 شحن للمغرب
-
-🔗 <a href="{link}">اطلب الآن</a>
-"""
-
-    return caption, image, link
-
-# ========= MAIN =========
+# 🔁 التشغيل المستمر
 while True:
+    print("🚀 جاري جلب المنتجات...")
+
     products = get_products()
 
     if not products:
-        time.sleep(1800)
+        print("❌ لا يوجد منتجات")
+        time.sleep(60)
         continue
 
-    winner = pick_winner(products)
+    product = pick_winning_product(products)
 
-    if winner:
-        caption, image, link = generate_caption(winner)
-        send_post(caption, image)
-        sent_links.add(link)
-        print("Posted:", link)
+    if not product:
+        print("❌ لا يوجد منتج رابح")
+        time.sleep(60)
+        continue
 
-    else:
-        print("No good product found")
+    title = product["product_title"]
+    price = product["target_sale_price"]
+    image = product["product_main_image_url"]
+    link = product["promotion_link"]
 
-    time.sleep(3600)  # كل ساعة
+    affiliate_link = make_affiliate_link(link)
+
+    text = generate_text(title, price)
+
+    final_post = f"""
+{text}
+
+💰 السعر: {price} درهم
+🚚 شحن للمغرب 🇲🇦
+
+🔗 اطلب الآن:
+{affiliate_link}
+"""
+
+    send_to_telegram(final_post, image)
+
+    print("✅ تم النشر")
+
+    # كل ساعتين
+    time.sleep(7200)
