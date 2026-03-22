@@ -142,3 +142,7 @@ def main():
 # ================= RUN =================
 if __name__ == "__main__":
     main()
+    send_photo_to_telegram(
+    "https://ae01.alicdn.com/kf/Sample.jpg",
+    "✅ Test message"
+)
