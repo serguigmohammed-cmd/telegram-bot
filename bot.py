@@ -8,13 +8,14 @@ import logging
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 APP_SECRET = os.getenv("APP_SECRET")
-
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
 POST_INTERVAL = 1800
 ERROR_DELAY = 60
+MAX_RETRIES = 3
 
 if not TOKEN:
     raise Exception("❌ TELEGRAM_TOKEN missing")
@@ -27,11 +28,11 @@ log = logging.getLogger()
 
 # ================= KEYWORDS =================
 KEYWORDS = [
-    "tiktok gadgets",
-    "viral products",
-    "smart gadgets",
+    "tiktok made me buy it",
+    "viral gadgets",
+    "trending products",
+    "smart home devices",
     "kitchen tools",
-    "car accessories"
 ]
 
 used_ids = []
@@ -44,32 +45,43 @@ def generate_sign(params):
 
 # ================= GET PRODUCTS =================
 def get_products():
-    url = "https://api-sg.aliexpress.com/rest"
-
-    params = {
-        "method": "aliexpress.affiliate.product.query",
-        "app_key": APP_KEY,
-        "timestamp": str(int(time.time() * 1000)),
-        "format": "json",
-        "v": "2.0",
-        "keywords": random.choice(KEYWORDS),
-        "page_size": 20,
-        "tracking_id": TRACKING_ID
-    }
-
-    params["sign"] = generate_sign(params)
-
     try:
+        url = "https://api-sg.aliexpress.com/rest"
+
+        params = {
+            "method": "aliexpress.affiliate.product.query",
+            "app_key": APP_KEY,
+            "timestamp": str(int(time.time() * 1000)),
+            "format": "json",
+            "v": "2.0",
+            "keywords": random.choice(KEYWORDS),
+            "page_size": 20,
+            "tracking_id": TRACKING_ID
+        }
+
+        params["sign"] = generate_sign(params)
+
         res = requests.get(url, params=params, timeout=30)
+
+        if res.status_code != 200:
+            return None
+
         return res.json()
+
     except Exception as e:
-        log.error(e)
+        log.error(f"API error: {e}")
         return None
 
 # ================= FILTER =================
 def pick_best_product(data):
     try:
-        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
+        products = (
+            data.get("aliexpress_affiliate_product_query_response", {})
+            .get("resp_result", {})
+            .get("result", {})
+            .get("products", {})
+            .get("product", [])
+        )
 
         best = []
 
@@ -83,12 +95,8 @@ def pick_best_product(data):
                 orders = int(p.get("lastest_volume", 0))
                 rating = float(p.get("evaluate_rate", 0))
 
-                # 🔥 فلترة ذكية
-                if (
-                    3 < price < 50 and
-                    orders > 300 and
-                    rating >= 4.5
-                ):
+                # 🔥 فلترة أقوى (منتجات رابحة فقط)
+                if 5 < price < 50 and orders > 1000 and rating >= 4.5:
                     score = orders * rating
                     best.append((score, p))
             except:
@@ -107,11 +115,11 @@ def pick_best_product(data):
         return product
 
     except Exception as e:
-        log.error(e)
+        log.error(f"Parse error: {e}")
         return None
 
 # ================= GENERATE LINK =================
-def generate_link(url_product):
+def generate_link(product_url):
     try:
         url = "https://api-sg.aliexpress.com/rest"
 
@@ -121,7 +129,7 @@ def generate_link(url_product):
             "timestamp": str(int(time.time() * 1000)),
             "format": "json",
             "v": "2.0",
-            "source_values": url_product,
+            "source_values": product_url,
             "tracking_id": TRACKING_ID
         }
 
@@ -129,10 +137,19 @@ def generate_link(url_product):
 
         res = requests.get(url, params=params, timeout=30).json()
 
-        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+        return (
+            res
+            .get("aliexpress_affiliate_link_generate_response", {})
+            .get("resp_result", {})
+            .get("result", {})
+            .get("promotion_links", {})
+            .get("promotion_link", [{}])[0]
+            .get("promotion_link", product_url)
+        )
 
-    except:
-        return url_product
+    except Exception as e:
+        log.error(f"Link error: {e}")
+        return product_url
 
 # ================= FORMAT =================
 def build_caption(p, link):
@@ -140,36 +157,58 @@ def build_caption(p, link):
     price = p.get("target_sale_price")
     orders = p.get("lastest_volume")
 
-    return f"""🔥 <b>منتج ترند اليوم 🇲🇦</b>
+    return f"""🔥 <b>منتج ترند في المغرب 🇲🇦</b>
 
 📦 {title}
 
 💰 فقط {price}$
 📈 +{orders} طلب
 
-🚚 شحن سريع للمغرب
+⚠️ العرض محدود!
+
+🚚 شحن سريع
 
 🛒 <a href="{link}">اطلب الآن قبل نفاذ الكمية</a>
 """
 
 # ================= TELEGRAM =================
-def send(photo, caption):
+def send_message(text):
     try:
-        img = requests.get(photo, timeout=10)
-
-        if img.status_code != 200:
-            return
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"},
-            files={"photo": ("img.jpg", img.content)}
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
+            timeout=20
         )
+        return res.status_code == 200
+    except:
+        return False
 
-        log.info("✅ Posted")
 
-    except Exception as e:
-        log.error(e)
+def send(photo, caption):
+    for attempt in range(MAX_RETRIES):
+        try:
+            img = requests.get(photo, timeout=10)
+
+            if img.status_code != 200:
+                return send_message(caption)
+
+            res = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"},
+                files={"photo": ("img.jpg", img.content)},
+                timeout=20
+            )
+
+            if res.status_code == 200:
+                log.info("✅ Posted")
+                return True
+
+        except Exception as e:
+            log.error(e)
+
+        time.sleep(5)
+
+    return False
 
 # ================= MAIN =================
 def main():
@@ -190,12 +229,16 @@ def main():
             link = generate_link(product.get("product_detail_url"))
             caption = build_caption(product, link)
 
-            send(product.get("product_main_image_url"), caption)
+            success = send(product.get("product_main_image_url"), caption)
+
+            if not success:
+                time.sleep(ERROR_DELAY)
+                continue
 
             time.sleep(POST_INTERVAL)
 
         except Exception as e:
-            log.error(e)
+            log.error(f"Loop error: {e}")
             time.sleep(ERROR_DELAY)
 
 # ================= RUN =================
