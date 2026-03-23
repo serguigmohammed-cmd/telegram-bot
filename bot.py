@@ -14,7 +14,7 @@ POST_INTERVAL = 1800
 ERROR_DELAY = 60
 MAX_RETRIES = 3
 
-# ✅ تحقق من التوكن
+# ✅ Token check
 if not TOKEN or TOKEN.strip() == "":
     print("❌ TELEGRAM_TOKEN missing — STOP")
     sys.exit(1)
@@ -33,16 +33,8 @@ log = logging.getLogger()
 # ================= LOAD CSV =================
 try:
     df = pd.read_csv("products.csv")
-
-    # ✅ تحقق من الأعمدة
-    required_columns = ["Product Title", "Promotion Link", "Product URL"]
-    for col in required_columns:
-        if col not in df.columns:
-            log.error(f"❌ Missing column in CSV: {col}")
-            sys.exit(1)
-
 except Exception as e:
-    log.error(f"❌ Failed to load CSV: {e}")
+    log.error(f"❌ CSV load failed: {e}")
     sys.exit(1)
 
 # ================= TELEGRAM =================
@@ -52,27 +44,36 @@ def send_message(text):
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
             data={
                 "chat_id": CHAT_ID,
-                "text": text,
-                "disable_web_page_preview": False
+                "text": text
             },
             timeout=20
         )
 
+        # ✅ HTTP error
         if res.status_code != 200:
-            log.error(f"❌ HTTP Error: {res.status_code} - {res.text}")
-            return False
+            log.error(f"❌ HTTP {res.status_code}: {res.text}")
+            return False, None
 
         data = res.json()
 
+        # ✅ Handle Telegram error
         if not data.get("ok"):
-            log.error(f"❌ Telegram error: {data}")
-            return False
+            error_code = data.get("error_code")
 
-        return True
+            # 🔥 429 RATE LIMIT
+            if error_code == 429:
+                retry_after = data.get("parameters", {}).get("retry_after", 30)
+                log.warning(f"⏳ Rate limited. Retry after {retry_after}s")
+                return False, retry_after
+
+            log.error(f"❌ Telegram error: {data}")
+            return False, None
+
+        return True, None
 
     except Exception as e:
         log.error(f"❌ Request error: {e}")
-        return False
+        return False, None
 
 
 # ================= RETRY =================
@@ -80,11 +81,18 @@ def send_with_retry(message):
     for attempt in range(1, MAX_RETRIES + 1):
         log.info(f"📤 Attempt {attempt}")
 
-        if send_message(message):
+        success, retry_after = send_message(message)
+
+        if success:
             log.info("✅ Sent")
             return True
 
-        time.sleep(5)
+        # 🔥 إذا كان Rate Limit
+        if retry_after:
+            log.info(f"⏳ Waiting {retry_after}s بسبب 429")
+            time.sleep(retry_after)
+        else:
+            time.sleep(5)
 
     log.error("❌ Failed after retries")
     return False
@@ -94,35 +102,27 @@ def send_with_retry(message):
 def main():
     log.info("🚀 BOT STARTED")
 
-    used_links = []
     last_link = None
 
     while True:
         try:
-            # 🔁 اختيار منتج عشوائي
             product = df.sample(1).iloc[0]
 
             title = str(product.get("Product Title", "")).strip()[:70]
-
-            # 🔗 اختيار الرابط الصحيح
             link = product.get("Promotion Link") or product.get("Product URL")
 
-            if not link or str(link).strip() == "":
+            if not link:
                 continue
 
             link = str(link).strip()
 
-            # ❌ منع روابط وهمية
+            # ❌ Skip fake links
             if "xxx" in link.lower():
-                log.warning("⚠️ Fake link detected — skip")
+                log.warning("⚠️ Fake link — skipped")
                 continue
 
             # ❌ منع التكرار المباشر
             if link == last_link:
-                continue
-
-            # ❌ منع التكرار العام
-            if link in used_links:
                 continue
 
             message = f"""🔥 منتج ترند اليوم 🇲🇦
@@ -139,11 +139,6 @@ def main():
 
             if success:
                 last_link = link
-                used_links.append(link)
-
-                # ✅ حافظ على الحجم (FIFO بدل pop عشوائي)
-                if len(used_links) > 100:
-                    used_links.pop(0)
 
             time.sleep(POST_INTERVAL)
 
