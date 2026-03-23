@@ -5,164 +5,160 @@ import random
 import os
 import logging
 import sys
+from datetime import datetime
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-POST_INTERVAL = 1800
-ERROR_DELAY = 60
 MAX_RETRIES = 3
+ERROR_DELAY = 60
+
+POST_HOURS = [12, 18, 21]  # أوقات النشر (المغرب)
 
 # ================= VALIDATION =================
 if not TOKEN or TOKEN.strip() == "":
-    print("❌ TELEGRAM_TOKEN missing — STOP")
+    print("❌ TELEGRAM_TOKEN missing")
     sys.exit(1)
 
 if not CHAT_ID or CHAT_ID.strip() == "":
-    print("❌ TELEGRAM_CHAT_ID missing — STOP")
+    print("❌ TELEGRAM_CHAT_ID missing")
     sys.exit(1)
 
 # ================= LOG =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 log = logging.getLogger()
 
 # ================= LOAD CSV =================
 try:
     df = pd.read_csv("products.csv")
-
-    required_cols = ["Product Title", "Promotion Link", "Product URL"]
-    for col in required_cols:
-        if col not in df.columns:
-            log.error(f"❌ Missing column: {col}")
-            sys.exit(1)
-
 except Exception as e:
-    log.error(f"❌ CSV load failed: {e}")
+    log.error(f"CSV error: {e}")
     sys.exit(1)
 
+# ================= SMART FILTER =================
+def pick_product():
+    for _ in range(20):
+        product = df.sample(1).iloc[0]
+
+        title = str(product.get("Product Title", "")).strip()
+        link = product.get("Promotion Link") or product.get("Product URL")
+        image = product.get("Image URL")
+
+        if not title or not link or not image:
+            continue
+
+        if "xxx" in str(link).lower():
+            continue
+
+        return title[:80], link.strip(), image
+
+    return None, None, None
+
+
+# ================= AI CAPTION =================
+def generate_caption(title, link):
+    hooks = [
+        "🔥 عرض اليوم!",
+        "🚀 ترند الآن!",
+        "💥 تخفيض قوي!",
+        "😱 فرصة لا تعوض!",
+        "🛒 الأفضل حالياً!"
+    ]
+
+    ctas = [
+        "اطلب الآن قبل نفاذ الكمية 👇",
+        "سارع قبل انتهاء العرض ⏳",
+        "اضغط وشوف العرض الآن 🔥",
+        "لا تفوّت الفرصة 👇"
+    ]
+
+    return f"""{random.choice(hooks)} 🇲🇦
+
+📦 {title}
+
+{random.choice(ctas)}
+{link}
+"""
+
+
 # ================= TELEGRAM =================
-def send_message(text):
+def send_photo(photo, caption):
     try:
         res = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
             data={
                 "chat_id": CHAT_ID,
-                "text": text,
-                "disable_web_page_preview": False
+                "photo": photo,
+                "caption": caption
             },
             timeout=20
         )
 
-        if res.status_code != 200:
-            log.error(f"❌ HTTP {res.status_code}: {res.text}")
-            return False, None
-
         data = res.json()
 
         if not data.get("ok"):
-            error_code = data.get("error_code")
+            if data.get("error_code") == 429:
+                retry = data.get("parameters", {}).get("retry_after", 30)
+                return False, retry
 
-            # 🔥 RATE LIMIT
-            if error_code == 429:
-                retry_after = data.get("parameters", {}).get("retry_after", 30)
-                log.warning(f"⏳ Rate limited — wait {retry_after}s")
-                return False, retry_after
-
-            log.error(f"❌ Telegram error: {data}")
+            log.error(data)
             return False, None
 
         return True, None
 
     except Exception as e:
-        log.error(f"❌ Request error: {e}")
+        log.error(e)
         return False, None
 
 
 # ================= RETRY =================
-def send_with_retry(message):
-    for attempt in range(1, MAX_RETRIES + 1):
-        log.info(f"📤 Attempt {attempt}")
-
-        success, retry_after = send_message(message)
+def send_with_retry(photo, caption):
+    for i in range(MAX_RETRIES):
+        success, retry = send_photo(photo, caption)
 
         if success:
-            log.info("✅ Sent")
             return True
 
-        if retry_after:
-            time.sleep(retry_after)
-        else:
-            time.sleep(5)
+        time.sleep(retry if retry else 5)
 
-    log.error("❌ Failed after retries")
     return False
+
+
+# ================= SCHEDULER =================
+def wait_for_next_post():
+    while True:
+        now = datetime.now()
+        if now.hour in POST_HOURS and now.minute == 0:
+            return
+        time.sleep(30)
 
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 BOT STARTED")
+    log.info("🚀 Advanced BOT Started")
 
-    last_link = None
-    used_links = []
+    used_links = set()
 
     while True:
         try:
-            product = df.sample(1).iloc[0]
+            wait_for_next_post()
 
-            title = str(product.get("Product Title", "")).strip()[:70]
-            link = product.get("Promotion Link") or product.get("Product URL")
+            title, link, image = pick_product()
 
-            if not link or str(link).strip() == "":
+            if not link or link in used_links:
                 continue
 
-            link = str(link).strip()
+            caption = generate_caption(title, link)
 
-            # ❌ Skip fake links
-            if "xxx" in link.lower():
-                log.warning("⚠️ Fake link — skipped")
-                continue
+            if send_with_retry(image, caption):
+                used_links.add(link)
+                log.info("✅ Posted")
 
-            # ❌ منع التكرار المباشر
-            if link == last_link:
-                continue
-
-            # ❌ منع التكرار العام
-            if link in used_links:
-                continue
-
-            message = f"""🔥 منتج ترند اليوم 🇲🇦
-
-📦 {title}
-
-⚠️ العرض محدود!
-
-🛒 اطلب الآن 👇
-{link}
-"""
-
-            success = send_with_retry(message)
-
-            if success:
-                last_link = link
-                used_links.append(link)
-
-                # ✅ حافظ على الحجم (FIFO)
-                if len(used_links) > 100:
-                    used_links.pop(0)
-
-            else:
-                log.warning("⚠️ Send failed — retrying soon")
-                time.sleep(ERROR_DELAY)
-                continue
-
-            time.sleep(POST_INTERVAL)
+            time.sleep(60)
 
         except Exception as e:
-            log.error(f"🔥 Error: {e}")
+            log.error(f"Error: {e}")
             time.sleep(ERROR_DELAY)
 
 
