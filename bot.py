@@ -3,42 +3,30 @@ import time
 import random
 import os
 import logging
-import sys
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-POST_INTERVAL = 7200   # كل ساعتين
-ERROR_DELAY = 60
+POST_INTERVAL = 1800
 MAX_RETRIES = 3
 
-# ✅ FIX 1: تحقق من التوكن
-if not TOKEN or TOKEN.strip() == "":
-    print("❌ TELEGRAM_TOKEN missing — bot stopped")
-    sys.exit(1)
-
-if not CHAT_ID:
-    print("❌ TELEGRAM_CHAT_ID missing — bot stopped")
-    sys.exit(1)
-
-# ================= LOG =================
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
 
-# ================= POSTS =================
+# ✅ ضع روابطك هنا مرة واحدة فقط
 POSTS = [
     {
-        "title": "🔥 عرض اليوم",
-        "link": "https://s.click.aliexpress.com/e/_PUT_REAL_LINK1"
+        "title": "🔥 منتج ترند",
+        "link": "https://s.click.aliexpress.com/e/_abc123"
     },
     {
-        "title": "💡 منتج رهيب",
-        "link": "https://s.click.aliexpress.com/e/_PUT_REAL_LINK2"
+        "title": "💡 عرض قوي",
+        "link": "https://s.click.aliexpress.com/e/_def456"
     },
     {
         "title": "🎯 لا تفوت هذا",
-        "link": "https://s.click.aliexpress.com/e/_PUT_REAL_LINK3"
+        "link": "https://s.click.aliexpress.com/e/_ghi789"
     }
 ]
 
@@ -50,74 +38,35 @@ def send_message(text):
             data={"chat_id": CHAT_ID, "text": text},
             timeout=20
         )
-
-        data = res.json()
-
-        if not data.get("ok"):
-            log.error(f"❌ Telegram error: {data}")
-            return False
-
-        return True
-
-    except Exception as e:
-        log.error(f"❌ Request error: {e}")
+        return res.json().get("ok", False)
+    except:
         return False
 
-
-# ================= RETRY =================
-def send_with_retry(message):
-    for attempt in range(1, MAX_RETRIES + 1):
-        log.info(f"📤 Attempt {attempt}")
-
-        if send_message(message):
-            log.info("✅ Message sent")
+def send_with_retry(msg):
+    for i in range(MAX_RETRIES):
+        if send_message(msg):
+            log.info("✅ Sent")
             return True
-
-        log.warning("⚠️ Failed, retrying...")
         time.sleep(5)
-
-    log.error("❌ All retries failed")
     return False
-
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 Bot started")
-
-    last_post = None  # منع التكرار
+    last_post = None
 
     while True:
-        try:
+        post = random.choice(POSTS)
+
+        # منع التكرار
+        while post == last_post:
             post = random.choice(POSTS)
 
-            # ✅ منع التكرار
-            while post == last_post:
-                post = random.choice(POSTS)
+        msg = f"{post['title']}\n\n🛒 {post['link']}"
 
-            # ❌ منع روابط وهمية
-            if "xxx" in post["link"]:
-                log.warning("⚠️ Placeholder link detected — skipping")
-                time.sleep(ERROR_DELAY)
-                continue
+        if send_with_retry(msg):
+            last_post = post
 
-            message = f"{post['title']}\n\n🛒 {post['link']}"
-
-            success = send_with_retry(message)
-
-            if success:
-                last_post = post
-            else:
-                time.sleep(ERROR_DELAY)
-                continue
-
-            log.info("⏳ Waiting next post...")
-            time.sleep(POST_INTERVAL)
-
-        except Exception as e:
-            log.error(f"🔥 Loop error: {e}")
-            time.sleep(ERROR_DELAY)
-
+        time.sleep(POST_INTERVAL)
 
 # ================= RUN =================
-if __name__ == "__main__":
-    main()
+main()
