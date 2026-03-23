@@ -1,7 +1,6 @@
 import requests
 import time
 import random
-import hashlib
 import os
 import logging
 import sys
@@ -10,17 +9,17 @@ import sys
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-POST_INTERVAL = 1800
+POST_INTERVAL = 7200   # كل ساعتين
 ERROR_DELAY = 60
 MAX_RETRIES = 3
 
 # ✅ FIX 1: تحقق من التوكن
 if not TOKEN or TOKEN.strip() == "":
-    print("❌ TELEGRAM_TOKEN missing — stop bot")
+    print("❌ TELEGRAM_TOKEN missing — bot stopped")
     sys.exit(1)
 
 if not CHAT_ID:
-    print("❌ TELEGRAM_CHAT_ID missing")
+    print("❌ TELEGRAM_CHAT_ID missing — bot stopped")
     sys.exit(1)
 
 # ================= LOG =================
@@ -74,6 +73,7 @@ def send_with_retry(message):
             log.info("✅ Message sent")
             return True
 
+        log.warning("⚠️ Failed, retrying...")
         time.sleep(5)
 
     log.error("❌ All retries failed")
@@ -84,13 +84,13 @@ def send_with_retry(message):
 def main():
     log.info("🚀 Bot started")
 
-    last_post = None  # ✅ FIX 3: منع التكرار
+    last_post = None  # منع التكرار
 
     while True:
         try:
             post = random.choice(POSTS)
 
-            # 🔁 منع نفس المنشور
+            # ✅ منع التكرار
             while post == last_post:
                 post = random.choice(POSTS)
 
@@ -105,8 +105,7 @@ def main():
             success = send_with_retry(message)
 
             if success:
-                last_post = post  # حفظ آخر منشور
-
+                last_post = post
             else:
                 time.sleep(ERROR_DELAY)
                 continue
