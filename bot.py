@@ -14,30 +14,53 @@ POST_INTERVAL = 1800
 ERROR_DELAY = 60
 MAX_RETRIES = 3
 
-# ✅ FIX: تحقق من التوكن
+# ✅ تحقق من التوكن
 if not TOKEN or TOKEN.strip() == "":
     print("❌ TELEGRAM_TOKEN missing — STOP")
     sys.exit(1)
 
-if not CHAT_ID:
+if not CHAT_ID or CHAT_ID.strip() == "":
     print("❌ TELEGRAM_CHAT_ID missing — STOP")
     sys.exit(1)
 
 # ================= LOG =================
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 log = logging.getLogger()
 
 # ================= LOAD CSV =================
-df = pd.read_csv("products.csv")
+try:
+    df = pd.read_csv("products.csv")
+
+    # ✅ تحقق من الأعمدة
+    required_columns = ["Product Title", "Promotion Link", "Product URL"]
+    for col in required_columns:
+        if col not in df.columns:
+            log.error(f"❌ Missing column in CSV: {col}")
+            sys.exit(1)
+
+except Exception as e:
+    log.error(f"❌ Failed to load CSV: {e}")
+    sys.exit(1)
 
 # ================= TELEGRAM =================
 def send_message(text):
     try:
         res = requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": text},
+            data={
+                "chat_id": CHAT_ID,
+                "text": text,
+                "disable_web_page_preview": False
+            },
             timeout=20
         )
+
+        if res.status_code != 200:
+            log.error(f"❌ HTTP Error: {res.status_code} - {res.text}")
+            return False
 
         data = res.json()
 
@@ -71,26 +94,34 @@ def send_with_retry(message):
 def main():
     log.info("🚀 BOT STARTED")
 
-    used_links = set()
+    used_links = []
+    last_link = None
 
     while True:
         try:
+            # 🔁 اختيار منتج عشوائي
             product = df.sample(1).iloc[0]
 
-            title = str(product.get("Product Title", ""))[:70]
+            title = str(product.get("Product Title", "")).strip()[:70]
 
             # 🔗 اختيار الرابط الصحيح
             link = product.get("Promotion Link") or product.get("Product URL")
 
-            if not link:
+            if not link or str(link).strip() == "":
                 continue
 
-            # ❌ منع روابط xxx
-            if "xxx" in link:
+            link = str(link).strip()
+
+            # ❌ منع روابط وهمية
+            if "xxx" in link.lower():
                 log.warning("⚠️ Fake link detected — skip")
                 continue
 
-            # ❌ منع التكرار
+            # ❌ منع التكرار المباشر
+            if link == last_link:
+                continue
+
+            # ❌ منع التكرار العام
             if link in used_links:
                 continue
 
@@ -107,11 +138,12 @@ def main():
             success = send_with_retry(message)
 
             if success:
-                used_links.add(link)
+                last_link = link
+                used_links.append(link)
 
-                # حافظ على الحجم
+                # ✅ حافظ على الحجم (FIFO بدل pop عشوائي)
                 if len(used_links) > 100:
-                    used_links.pop()
+                    used_links.pop(0)
 
             time.sleep(POST_INTERVAL)
 
