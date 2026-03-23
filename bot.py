@@ -1,116 +1,202 @@
 import requests
 import time
 import random
+import hashlib
 import os
 import logging
-import signal
-import sys
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = "@orodmaroc"
+APP_SECRET = os.getenv("APP_SECRET")
 
-POST_INTERVAL = 7200   # 2 ساعات
-RETRY_DELAY = 60       # إعادة المحاولة بعد 1 دقيقة
-MAX_RETRIES = 3
+CHAT_ID = "@orodmaroc"
+APP_KEY = "530184"
+TRACKING_ID = "orodmaroc"
+
+POST_INTERVAL = 1800
+ERROR_DELAY = 60
 
 if not TOKEN:
-    raise Exception("❌ TELEGRAM_TOKEN missing in environment")
+    raise Exception("❌ TELEGRAM_TOKEN missing")
+if not APP_SECRET:
+    raise Exception("❌ APP_SECRET missing")
 
-# ================= LOGGING =================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# ================= LOG =================
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
 
-# ================= POSTS =================
-POSTS = [
-    {
-        "title": "🔥 منتج رهيب",
-        "link": "https://s.click.aliexpress.com/e/_abc123"
-    },
-    {
-        "title": "💡 عرض قوي",
-        "link": "https://s.click.aliexpress.com/e/_def456"
-    },
-    {
-        "title": "🎯 لا تفوت هذا المنتج",
-        "link": "https://s.click.aliexpress.com/e/_ghi789"
-    }
+# ================= KEYWORDS =================
+KEYWORDS = [
+    "tiktok gadgets",
+    "viral products",
+    "smart gadgets",
+    "kitchen tools",
+    "car accessories"
 ]
 
-# ================= SHUTDOWN FLAG =================
-running = True
+used_ids = []
 
-def shutdown_handler(signum, frame):
-    global running
-    log.info("🛑 Shutting down gracefully...")
-    running = False
+# ================= SIGN =================
+def generate_sign(params):
+    sorted_params = dict(sorted(params.items()))
+    sign = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
+    return hashlib.md5(sign.encode()).hexdigest().upper()
 
-signal.signal(signal.SIGINT, shutdown_handler)
-signal.signal(signal.SIGTERM, shutdown_handler)
+# ================= GET PRODUCTS =================
+def get_products():
+    url = "https://api-sg.aliexpress.com/rest"
 
-# ================= TELEGRAM =================
-def send_message(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    params = {
+        "method": "aliexpress.affiliate.product.query",
+        "app_key": APP_KEY,
+        "timestamp": str(int(time.time() * 1000)),
+        "format": "json",
+        "v": "2.0",
+        "keywords": random.choice(KEYWORDS),
+        "page_size": 20,
+        "tracking_id": TRACKING_ID
+    }
+
+    params["sign"] = generate_sign(params)
 
     try:
-        res = requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": text
-        }, timeout=20)
-
-        if res.status_code != 200:
-            log.error(f"❌ HTTP {res.status_code}: {res.text}")
-            return False
-
-        data = res.json()
-        return data.get("ok", False)
-
+        res = requests.get(url, params=params, timeout=30)
+        return res.json()
     except Exception as e:
-        log.error(f"❌ Request error: {e}")
-        return False
+        log.error(e)
+        return None
 
-# ================= RETRY SYSTEM =================
-def send_with_retry(message):
-    for attempt in range(1, MAX_RETRIES + 1):
-        log.info(f"📤 Attempt {attempt}")
+# ================= FILTER =================
+def pick_best_product(data):
+    try:
+        products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        success = send_message(message)
+        best = []
 
-        if success:
-            log.info("✅ Message sent successfully")
-            return True
+        for p in products:
+            try:
+                pid = p.get("product_id")
+                if pid in used_ids:
+                    continue
 
-        log.warning(f"⚠️ Failed attempt {attempt}")
-        time.sleep(RETRY_DELAY)
+                price = float(p.get("target_sale_price", 0))
+                orders = int(p.get("lastest_volume", 0))
+                rating = float(p.get("evaluate_rate", 0))
 
-    log.error("❌ All retries failed")
-    return False
-
-# ================= MAIN LOOP =================
-def main():
-    log.info("🚀 Bot started")
-
-    while running:
-        try:
-            post = random.choice(POSTS)
-
-            message = f"{post['title']}\n\n🛒 {post['link']}"
-
-            success = send_with_retry(message)
-
-            if not success:
-                log.warning("⚠️ Will retry soon (not waiting 2h)")
-                time.sleep(RETRY_DELAY)
+                # 🔥 فلترة ذكية
+                if (
+                    3 < price < 50 and
+                    orders > 300 and
+                    rating >= 4.5
+                ):
+                    score = orders * rating
+                    best.append((score, p))
+            except:
                 continue
 
-            log.info("⏳ Waiting for next post...")
+        if not best:
+            return None
+
+        best.sort(reverse=True)
+        product = best[0][1]
+
+        used_ids.append(product.get("product_id"))
+        if len(used_ids) > 100:
+            used_ids.pop(0)
+
+        return product
+
+    except Exception as e:
+        log.error(e)
+        return None
+
+# ================= GENERATE LINK =================
+def generate_link(url_product):
+    try:
+        url = "https://api-sg.aliexpress.com/rest"
+
+        params = {
+            "method": "aliexpress.affiliate.link.generate",
+            "app_key": APP_KEY,
+            "timestamp": str(int(time.time() * 1000)),
+            "format": "json",
+            "v": "2.0",
+            "source_values": url_product,
+            "tracking_id": TRACKING_ID
+        }
+
+        params["sign"] = generate_sign(params)
+
+        res = requests.get(url, params=params, timeout=30).json()
+
+        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+
+    except:
+        return url_product
+
+# ================= FORMAT =================
+def build_caption(p, link):
+    title = (p.get("product_title") or "")[:70]
+    price = p.get("target_sale_price")
+    orders = p.get("lastest_volume")
+
+    return f"""🔥 <b>منتج ترند اليوم 🇲🇦</b>
+
+📦 {title}
+
+💰 فقط {price}$
+📈 +{orders} طلب
+
+🚚 شحن سريع للمغرب
+
+🛒 <a href="{link}">اطلب الآن قبل نفاذ الكمية</a>
+"""
+
+# ================= TELEGRAM =================
+def send(photo, caption):
+    try:
+        img = requests.get(photo, timeout=10)
+
+        if img.status_code != 200:
+            return
+
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+            data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"},
+            files={"photo": ("img.jpg", img.content)}
+        )
+
+        log.info("✅ Posted")
+
+    except Exception as e:
+        log.error(e)
+
+# ================= MAIN =================
+def main():
+    log.info("🚀 Smart bot started")
+
+    while True:
+        try:
+            data = get_products()
+            if not data:
+                time.sleep(ERROR_DELAY)
+                continue
+
+            product = pick_best_product(data)
+            if not product:
+                time.sleep(ERROR_DELAY)
+                continue
+
+            link = generate_link(product.get("product_detail_url"))
+            caption = build_caption(product, link)
+
+            send(product.get("product_main_image_url"), caption)
+
             time.sleep(POST_INTERVAL)
 
         except Exception as e:
-            log.error(f"🔥 Loop error: {e}")
-            time.sleep(RETRY_DELAY)
-
-    log.info("👋 Bot stopped cleanly")
+            log.error(e)
+            time.sleep(ERROR_DELAY)
 
 # ================= RUN =================
 if __name__ == "__main__":
