@@ -28,7 +28,8 @@ log = logging.getLogger()
 log.info("🚀 BOT STARTED")
 
 # ================= MEMORY =================
-last_product_id = None
+product_pool = []
+current_index = 0
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -46,7 +47,7 @@ def send_photo(photo_url, caption, retries=3):
 
             img = requests.get(photo_url, timeout=15)
             if img.status_code != 200:
-                log.error("❌ Image download failed")
+                log.error("❌ Image error")
                 return False
 
             res = requests.post(
@@ -61,7 +62,7 @@ def send_photo(photo_url, caption, retries=3):
             )
 
             if res.status_code != 200:
-                log.error(f"❌ HTTP {res.status_code}: {res.text}")
+                log.error(f"❌ HTTP {res.status_code}")
                 time.sleep(2)
                 continue
 
@@ -72,7 +73,7 @@ def send_photo(photo_url, caption, retries=3):
                 time.sleep(2)
                 continue
 
-            log.info("✅ Message sent")
+            log.info("✅ Sent")
             return True
 
         except Exception as e:
@@ -96,7 +97,7 @@ def get_products():
             "kitchen tools",
             "car accessories"
         ]),
-        "page_size": 10,
+        "page_size": 20,
         "tracking_id": TRACKING_ID
     }
 
@@ -104,8 +105,6 @@ def get_products():
 
     try:
         res = requests.get(url, params=params, timeout=30)
-
-        log.info(f"🌐 API Status: {res.status_code}")
 
         if res.status_code != 200:
             return None
@@ -137,15 +136,13 @@ def generate_link(product_url):
 
     try:
         res = requests.get(url, params=params, timeout=30).json()
-
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-
     except:
         return product_url
 
-# ================= FILTER =================
-def pick_product(data):
-    global last_product_id
+# ================= BUILD POOL =================
+def build_pool(data):
+    global product_pool, current_index
 
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
@@ -154,47 +151,55 @@ def pick_product(data):
 
         for p in products:
             try:
-                pid = p.get("product_id")
-
-                if pid == last_product_id:
-                    continue
-
                 price = float(p.get("target_sale_price", 0))
                 orders = int(p.get("lastest_volume", 0))
 
                 if 5 < price < 40 and orders > 100:
                     valid.append(p)
-
             except:
                 continue
 
-        if not valid:
-            return None
+        random.shuffle(valid)
 
-        product = random.choice(valid)
-        last_product_id = product.get("product_id")
+        product_pool = valid
+        current_index = 0
 
-        return product
+        log.info(f"📦 Pool built: {len(product_pool)} products")
 
     except Exception as e:
-        log.error(f"❌ Parse error: {e}")
+        log.error(f"❌ Pool error: {e}")
+
+# ================= GET NEXT =================
+def get_next_product():
+    global current_index, product_pool
+
+    if current_index >= len(product_pool):
         return None
+
+    product = product_pool[current_index]
+    current_index += 1
+
+    return product
 
 # ================= MAIN =================
 def main():
     log.info("⏳ Waiting before first post...")
-    time.sleep(POST_INTERVAL)  # ✅ يمنع spam عند restart
+    time.sleep(POST_INTERVAL)
 
     while True:
         try:
-            log.info("🔄 New cycle")
+            if not product_pool or current_index >= len(product_pool):
+                log.info("🔄 Building new product pool...")
+                data = get_products()
 
-            data = get_products()
-            if not data:
-                time.sleep(ERROR_DELAY)
-                continue
+                if not data:
+                    time.sleep(ERROR_DELAY)
+                    continue
 
-            product = pick_product(data)
+                build_pool(data)
+
+            product = get_next_product()
+
             if not product:
                 time.sleep(ERROR_DELAY)
                 continue
