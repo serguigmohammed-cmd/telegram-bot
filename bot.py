@@ -14,7 +14,7 @@ POST_INTERVAL = 1800
 ERROR_DELAY = 60
 MAX_RETRIES = 3
 
-# ✅ Token check
+# ================= VALIDATION =================
 if not TOKEN or TOKEN.strip() == "":
     print("❌ TELEGRAM_TOKEN missing — STOP")
     sys.exit(1)
@@ -33,6 +33,13 @@ log = logging.getLogger()
 # ================= LOAD CSV =================
 try:
     df = pd.read_csv("products.csv")
+
+    required_cols = ["Product Title", "Promotion Link", "Product URL"]
+    for col in required_cols:
+        if col not in df.columns:
+            log.error(f"❌ Missing column: {col}")
+            sys.exit(1)
+
 except Exception as e:
     log.error(f"❌ CSV load failed: {e}")
     sys.exit(1)
@@ -44,26 +51,25 @@ def send_message(text):
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
             data={
                 "chat_id": CHAT_ID,
-                "text": text
+                "text": text,
+                "disable_web_page_preview": False
             },
             timeout=20
         )
 
-        # ✅ HTTP error
         if res.status_code != 200:
             log.error(f"❌ HTTP {res.status_code}: {res.text}")
             return False, None
 
         data = res.json()
 
-        # ✅ Handle Telegram error
         if not data.get("ok"):
             error_code = data.get("error_code")
 
-            # 🔥 429 RATE LIMIT
+            # 🔥 RATE LIMIT
             if error_code == 429:
                 retry_after = data.get("parameters", {}).get("retry_after", 30)
-                log.warning(f"⏳ Rate limited. Retry after {retry_after}s")
+                log.warning(f"⏳ Rate limited — wait {retry_after}s")
                 return False, retry_after
 
             log.error(f"❌ Telegram error: {data}")
@@ -87,9 +93,7 @@ def send_with_retry(message):
             log.info("✅ Sent")
             return True
 
-        # 🔥 إذا كان Rate Limit
         if retry_after:
-            log.info(f"⏳ Waiting {retry_after}s بسبب 429")
             time.sleep(retry_after)
         else:
             time.sleep(5)
@@ -103,6 +107,7 @@ def main():
     log.info("🚀 BOT STARTED")
 
     last_link = None
+    used_links = []
 
     while True:
         try:
@@ -111,7 +116,7 @@ def main():
             title = str(product.get("Product Title", "")).strip()[:70]
             link = product.get("Promotion Link") or product.get("Product URL")
 
-            if not link:
+            if not link or str(link).strip() == "":
                 continue
 
             link = str(link).strip()
@@ -123,6 +128,10 @@ def main():
 
             # ❌ منع التكرار المباشر
             if link == last_link:
+                continue
+
+            # ❌ منع التكرار العام
+            if link in used_links:
                 continue
 
             message = f"""🔥 منتج ترند اليوم 🇲🇦
@@ -139,6 +148,16 @@ def main():
 
             if success:
                 last_link = link
+                used_links.append(link)
+
+                # ✅ حافظ على الحجم (FIFO)
+                if len(used_links) > 100:
+                    used_links.pop(0)
+
+            else:
+                log.warning("⚠️ Send failed — retrying soon")
+                time.sleep(ERROR_DELAY)
+                continue
 
             time.sleep(POST_INTERVAL)
 
