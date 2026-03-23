@@ -6,7 +6,7 @@ import os
 import logging
 
 # ================= CONFIG =================
-TOKEN = os.getenv("TOKEN")              # 🔐 من Secrets
+TOKEN = os.getenv("TOKEN")          # 🔐 من Secrets
 APP_SECRET = os.getenv("APP_SECRET")
 
 CHAT_ID = "@orodmaroc"
@@ -21,10 +21,7 @@ if not APP_SECRET:
     raise Exception("❌ APP_SECRET missing (add it in Secrets)")
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger()
 
 log.info("🚀 BOT STARTED")
@@ -44,10 +41,11 @@ def send_photo(photo_url, caption, retries=3):
 
     for attempt in range(retries):
         try:
-            img = requests.get(photo_url, timeout=15)
+            log.info(f"📤 Attempt {attempt+1}")
 
+            img = requests.get(photo_url, timeout=15)
             if img.status_code != 200:
-                log.error(f"❌ Image error: {img.status_code}")
+                log.error("❌ Image download failed")
                 return False
 
             res = requests.post(
@@ -110,13 +108,12 @@ def get_products():
         log.info(f"🌐 API Status: {res.status_code}")
 
         if res.status_code != 200:
-            log.error("❌ API error")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"❌ API exception: {e}")
+        log.error(f"❌ API error: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -143,8 +140,7 @@ def generate_link(product_url):
 
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
 
-    except Exception as e:
-        log.error(f"❌ Link error: {e}")
+    except:
         return product_url
 
 # ================= FILTER =================
@@ -152,7 +148,7 @@ def pick_product(data):
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        good = []
+        valid = []
 
         for p in products:
             try:
@@ -165,17 +161,17 @@ def pick_product(data):
                 orders = int(p.get("lastest_volume", 0))
 
                 if 5 < price < 40 and orders > 100:
-                    good.append(p)
+                    valid.append(p)
 
             except:
                 continue
 
-        log.info(f"📊 Found {len(good)} good products")
+        log.info(f"📊 Found {len(valid)} products")
 
-        if not good:
+        if not valid:
             return None
 
-        product = random.choice(good)
+        product = random.choice(valid)
         used_products.add(product.get("product_id"))
 
         return product
@@ -186,41 +182,34 @@ def pick_product(data):
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 Bot started successfully")
-
     while True:
         try:
             log.info("🔄 New cycle")
 
             data = get_products()
-
             if not data:
                 time.sleep(20)
                 continue
 
             product = pick_product(data)
-
             if not product:
-                log.warning("⚠️ No product found")
                 time.sleep(20)
                 continue
 
             image = product.get("product_main_image_url", "")
-            normal_link = product.get("product_detail_url", "")
-
-            aff_link = generate_link(normal_link)
+            link = generate_link(product.get("product_detail_url", ""))
 
             caption = f"""
 🔥 <b>عرض اليوم 🇲🇦</b>
 
 📦 {product.get("product_title","")[:60]}
 
-💰 السعر: {product.get("target_sale_price")} $
-📈 الطلبات: {product.get("lastest_volume")}
+💰 {product.get("target_sale_price")} $
+📈 {product.get("lastest_volume")} طلب
 
 🚚 شحن للمغرب
 
-🛒 <a href="{aff_link}">اشتري الآن</a>
+🛒 <a href="{link}">اشتري الآن</a>
 """
 
             if image:
