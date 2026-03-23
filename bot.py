@@ -4,14 +4,11 @@ import random
 import hashlib
 import os
 import logging
+import sys
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-APP_SECRET = os.getenv("APP_SECRET")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-APP_KEY = "530184"
-TRACKING_ID = "orodmaroc"
 
 POST_INTERVAL = 1800
 ERROR_DELAY = 60
@@ -19,19 +16,18 @@ MAX_RETRIES = 3
 
 # ✅ FIX 1: تحقق من التوكن
 if not TOKEN or TOKEN.strip() == "":
-    raise Exception("❌ TELEGRAM_TOKEN is missing or empty")
-
-if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing")
+    print("❌ TELEGRAM_TOKEN missing — stop bot")
+    sys.exit(1)
 
 if not CHAT_ID:
-    raise Exception("❌ TELEGRAM_CHAT_ID missing")
+    print("❌ TELEGRAM_CHAT_ID missing")
+    sys.exit(1)
 
 # ================= LOG =================
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
 
-# ================= POSTS (استعمل روابط حقيقية) =================
+# ================= POSTS =================
 POSTS = [
     {
         "title": "🔥 عرض اليوم",
@@ -56,30 +52,28 @@ def send_message(text):
             timeout=20
         )
 
-        if res.status_code != 200:
-            log.error(f"❌ HTTP {res.status_code}: {res.text}")
+        data = res.json()
+
+        if not data.get("ok"):
+            log.error(f"❌ Telegram error: {data}")
             return False
 
-        data = res.json()
-        return data.get("ok", False)
+        return True
 
     except Exception as e:
         log.error(f"❌ Request error: {e}")
         return False
 
 
-# ✅ FIX 3: Retry system
+# ================= RETRY =================
 def send_with_retry(message):
     for attempt in range(1, MAX_RETRIES + 1):
         log.info(f"📤 Attempt {attempt}")
 
-        success = send_message(message)
-
-        if success:
+        if send_message(message):
             log.info("✅ Message sent")
             return True
 
-        log.warning("⚠️ Failed attempt, retrying...")
         time.sleep(5)
 
     log.error("❌ All retries failed")
@@ -90,13 +84,19 @@ def send_with_retry(message):
 def main():
     log.info("🚀 Bot started")
 
+    last_post = None  # ✅ FIX 3: منع التكرار
+
     while True:
         try:
             post = random.choice(POSTS)
 
-            # ⚠️ منع إرسال روابط خاطئة
+            # 🔁 منع نفس المنشور
+            while post == last_post:
+                post = random.choice(POSTS)
+
+            # ❌ منع روابط وهمية
             if "xxx" in post["link"]:
-                log.warning("⚠️ Placeholder link detected, skipping")
+                log.warning("⚠️ Placeholder link detected — skipping")
                 time.sleep(ERROR_DELAY)
                 continue
 
@@ -104,8 +104,10 @@ def main():
 
             success = send_with_retry(message)
 
-            if not success:
-                log.warning("⚠️ Will retry soon")
+            if success:
+                last_post = post  # حفظ آخر منشور
+
+            else:
                 time.sleep(ERROR_DELAY)
                 continue
 
