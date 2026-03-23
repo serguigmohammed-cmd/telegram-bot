@@ -6,7 +6,7 @@ import os
 import logging
 
 # ================= CONFIG =================
-TOKEN = os.getenv("TOKEN")              # 🔐 من Secrets
+TOKEN = os.getenv("TOKEN")
 APP_SECRET = os.getenv("APP_SECRET")
 
 CHAT_ID = "@orodmaroc"
@@ -28,7 +28,7 @@ log = logging.getLogger()
 log.info("🚀 BOT STARTED")
 
 # ================= MEMORY =================
-used_ids = set()
+used_ids = []
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -45,9 +45,11 @@ def send_photo(photo_url, caption, retries=3):
             log.info(f"📤 Attempt {attempt+1}")
 
             img = requests.get(photo_url, timeout=15)
+
+            # 🔥 fallback إذا الصورة ما خداماش
             if img.status_code != 200:
-                log.error("❌ Image download failed")
-                return False
+                log.warning("⚠️ Image failed → sending text only")
+                return send_message(caption)
 
             res = requests.post(
                 url,
@@ -72,7 +74,7 @@ def send_photo(photo_url, caption, retries=3):
                 time.sleep(2)
                 continue
 
-            log.info("✅ Message sent successfully")
+            log.info("✅ Photo sent")
             return True
 
         except Exception as e:
@@ -80,6 +82,22 @@ def send_photo(photo_url, caption, retries=3):
             time.sleep(2)
 
     return False
+
+
+def send_message(text):
+    try:
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={
+                "chat_id": CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML"
+            },
+            timeout=20
+        )
+        return res.status_code == 200
+    except:
+        return False
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -167,7 +185,12 @@ def pick_product(data):
             return None
 
         product = random.choice(valid)
-        used_ids.add(product.get("product_id"))
+
+        used_ids.append(product.get("product_id"))
+
+        # 🔥 تنظيف الذاكرة
+        if len(used_ids) > 50:
+            used_ids.pop(0)
 
         return product
 
