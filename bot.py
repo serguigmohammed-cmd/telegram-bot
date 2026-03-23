@@ -14,15 +14,18 @@ APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
 POST_INTERVAL = 600       # 10 دقائق
-ERROR_RETRY_DELAY = 30    # 30 ثانية فحالة الخطأ
+ERROR_RETRY_DELAY = 30    # إعادة المحاولة عند الخطأ
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (set in Secrets)")
+    raise Exception("❌ TOKEN missing (add in Secrets)")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (set in Secrets)")
+    raise Exception("❌ APP_SECRET missing (add in Secrets)")
 
 # ================= LOGGING =================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 log = logging.getLogger()
 
 log.info("🚀 BOT STARTED")
@@ -79,6 +82,7 @@ def send_photo(photo_url, caption, retries=3):
             log.error(f"❌ Send error: {e}")
             time.sleep(2)
 
+    log.error("❌ Failed after retries")
     return False
 
 # ================= GET PRODUCTS =================
@@ -138,7 +142,8 @@ def generate_link(product_url):
     try:
         res = requests.get(url, params=params, timeout=30).json()
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-    except:
+    except Exception as e:
+        log.error(f"❌ Link error: {e}")
         return product_url
 
 # ================= FILTER =================
@@ -146,7 +151,7 @@ def pick_product(data):
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
-        good = []
+        valid = []
 
         for p in products:
             try:
@@ -159,17 +164,17 @@ def pick_product(data):
                 orders = int(p.get("lastest_volume", 0))
 
                 if 5 < price < 40 and orders > 100:
-                    good.append(p)
+                    valid.append(p)
 
             except:
                 continue
 
-        log.info(f"📊 Found {len(good)} products")
+        log.info(f"📊 Found {len(valid)} products")
 
-        if not good:
+        if not valid:
             return None
 
-        product = random.choice(good)
+        product = random.choice(valid)
         used_products.add(product.get("product_id"))
 
         return product
@@ -202,8 +207,8 @@ def main():
 
 📦 {product.get("product_title","")[:60]}
 
-💰 {product.get("target_sale_price")} $
-📈 {product.get("lastest_volume")} طلب
+💰 السعر: {product.get("target_sale_price")} $
+📈 الطلبات: {product.get("lastest_volume")}
 
 🚚 شحن للمغرب
 
@@ -214,7 +219,7 @@ def main():
                 success = send_photo(image, caption)
 
                 if not success:
-                    log.warning("⚠️ إرسال فشل → إعادة المحاولة قريباً")
+                    log.warning("⚠️ فشل الإرسال → إعادة المحاولة قريباً")
                     time.sleep(ERROR_RETRY_DELAY)
                     continue
 
