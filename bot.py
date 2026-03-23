@@ -9,7 +9,7 @@ import logging
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 APP_SECRET = os.getenv("APP_SECRET")
 
-CHAT_ID = "@orodmaroc"
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
