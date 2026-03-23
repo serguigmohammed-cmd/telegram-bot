@@ -64,13 +64,13 @@ def get_products():
         res = requests.get(url, params=params, timeout=30)
 
         if res.status_code != 200:
-            log.error(f"API HTTP {res.status_code}")
+            log.error(f"❌ API HTTP {res.status_code}")
             return None
 
         return res.json()
 
     except Exception as e:
-        log.error(f"API error: {e}")
+        log.error(f"❌ API error: {e}")
         return None
 
 # ================= FILTER =================
@@ -103,7 +103,7 @@ def pick_best_product(data):
                 continue
 
         if not best:
-            log.warning("⚠️ No good products found")
+            log.warning("⚠️ No good products")
             return None
 
         best.sort(reverse=True)
@@ -116,10 +116,10 @@ def pick_best_product(data):
         return product
 
     except Exception as e:
-        log.error(f"Parse error: {e}")
+        log.error(f"❌ Parse error: {e}")
         return None
 
-# ================= GENERATE LINK =================
+# ================= GENERATE LINK (FIXED) =================
 def generate_link(product_url):
     try:
         url = "https://api-sg.aliexpress.com/rest"
@@ -139,6 +139,8 @@ def generate_link(product_url):
         res = requests.get(url, params=params, timeout=30)
         data = res.json()
 
+        log.info(f"🔍 LINK DEBUG: {data}")
+
         link = (
             data
             .get("aliexpress_affiliate_link_generate_response", {})
@@ -150,14 +152,14 @@ def generate_link(product_url):
         )
 
         if not link:
-            log.error(f"❌ Affiliate link failed: {data}")
-            return product_url
+            log.error("❌ Affiliate link NOT generated")
+            return None
 
         return link
 
     except Exception as e:
-        log.error(f"Link error: {e}")
-        return product_url
+        log.error(f"❌ Link error: {e}")
+        return None
 
 # ================= FORMAT =================
 def build_caption(p, link):
@@ -187,6 +189,7 @@ def send_message(text):
             data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=20
         )
+
         data = res.json()
 
         if not data.get("ok"):
@@ -220,8 +223,6 @@ def send(photo, caption):
             if data.get("ok"):
                 log.info("✅ Posted")
                 return True
-            else:
-                log.error(f"❌ Telegram reject: {data}")
 
         except Exception as e:
             log.error(e)
@@ -247,19 +248,25 @@ def main():
                 continue
 
             link = generate_link(product.get("product_detail_url"))
+
+            # ❌ لا ترسل إذا الرابط فشل
+            if not link:
+                log.warning("⚠️ Skipping product (no affiliate link)")
+                time.sleep(ERROR_DELAY)
+                continue
+
             caption = build_caption(product, link)
 
             success = send(product.get("product_main_image_url"), caption)
 
             if not success:
-                log.warning("⚠️ Failed to send → retry soon")
                 time.sleep(ERROR_DELAY)
                 continue
 
             time.sleep(POST_INTERVAL)
 
         except Exception as e:
-            log.error(f"Loop error: {e}")
+            log.error(f"🔥 Loop error: {e}")
             time.sleep(ERROR_DELAY)
 
 # ================= RUN =================
