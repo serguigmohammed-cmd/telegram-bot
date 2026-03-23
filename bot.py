@@ -13,11 +13,11 @@ CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 600      # 10 دقائق
-ERROR_DELAY = 30         # retry عند الخطأ
+POST_INTERVAL = 600
+ERROR_DELAY = 30
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (set it in Secrets)")
+    raise Exception("❌ TOKEN missing (add it in Secrets)")
 if not APP_SECRET:
     raise Exception("❌ APP_SECRET missing")
 
@@ -28,7 +28,7 @@ log = logging.getLogger()
 log.info("🚀 BOT STARTED")
 
 # ================= MEMORY =================
-used_ids = []
+used_ids = set()
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -46,6 +46,7 @@ def send_photo(photo_url, caption, retries=3):
 
             img = requests.get(photo_url, timeout=15)
             if img.status_code != 200:
+                log.error("❌ Image download failed")
                 return False
 
             res = requests.post(
@@ -60,22 +61,22 @@ def send_photo(photo_url, caption, retries=3):
             )
 
             if res.status_code != 200:
-                log.error(res.text)
+                log.error(f"❌ HTTP {res.status_code}: {res.text}")
                 time.sleep(2)
                 continue
 
             data = res.json()
 
             if not data.get("ok"):
-                log.error(data)
+                log.error(f"❌ Telegram rejected: {data}")
                 time.sleep(2)
                 continue
 
-            log.info("✅ Sent")
+            log.info("✅ Message sent successfully")
             return True
 
         except Exception as e:
-            log.error(e)
+            log.error(f"❌ Send error: {e}")
             time.sleep(2)
 
     return False
@@ -90,7 +91,11 @@ def get_products():
         "timestamp": str(int(time.time() * 1000)),
         "format": "json",
         "v": "2.0",
-        "keywords": random.choice(["gadgets","kitchen","car"]),
+        "keywords": random.choice([
+            "smart gadgets",
+            "kitchen tools",
+            "car accessories"
+        ]),
         "page_size": 20,
         "tracking_id": TRACKING_ID
     }
@@ -99,8 +104,15 @@ def get_products():
 
     try:
         res = requests.get(url, params=params, timeout=30)
+
+        if res.status_code != 200:
+            log.error("❌ API HTTP error")
+            return None
+
         return res.json()
-    except:
+
+    except Exception as e:
+        log.error(f"❌ API error: {e}")
         return None
 
 # ================= AFFILIATE LINK =================
@@ -125,7 +137,8 @@ def generate_link(product_url):
     try:
         res = requests.get(url, params=params, timeout=30).json()
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-    except:
+    except Exception as e:
+        log.error(f"❌ Link error: {e}")
         return product_url
 
 # ================= PICK PRODUCT =================
@@ -154,16 +167,12 @@ def pick_product(data):
             return None
 
         product = random.choice(valid)
-
-        used_ids.append(product.get("product_id"))
-
-        # تنظيف الذاكرة باش ما تكبرش بزاف
-        if len(used_ids) > 50:
-            used_ids.pop(0)
+        used_ids.add(product.get("product_id"))
 
         return product
 
-    except:
+    except Exception as e:
+        log.error(f"❌ Parse error: {e}")
         return None
 
 # ================= MAIN =================
@@ -173,14 +182,14 @@ def main():
 
     while True:
         try:
-            data = get_products()
+            log.info("🔄 New cycle")
 
+            data = get_products()
             if not data:
                 time.sleep(ERROR_DELAY)
                 continue
 
             product = pick_product(data)
-
             if not product:
                 time.sleep(ERROR_DELAY)
                 continue
