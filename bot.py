@@ -6,32 +6,29 @@ import os
 import logging
 
 # ================= CONFIG =================
-TOKEN = os.getenv("TOKEN")              # 🔐 من Secrets
+TOKEN = os.getenv("TOKEN")
 APP_SECRET = os.getenv("APP_SECRET")
 
 CHAT_ID = "@orodmaroc"
 APP_KEY = "530184"
 TRACKING_ID = "orodmaroc"
 
-POST_INTERVAL = 600       # 10 دقائق
-ERROR_RETRY_DELAY = 30    # إعادة المحاولة عند الخطأ
+POST_INTERVAL = 600
+ERROR_DELAY = 30
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (add in Secrets)")
+    raise Exception("❌ TOKEN missing (set in Secrets)")
 if not APP_SECRET:
-    raise Exception("❌ APP_SECRET missing (add in Secrets)")
+    raise Exception("❌ APP_SECRET missing")
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger()
 
 log.info("🚀 BOT STARTED")
 
 # ================= MEMORY =================
-used_products = set()
+last_product_id = None
 
 # ================= SIGN =================
 def generate_sign(params):
@@ -75,14 +72,13 @@ def send_photo(photo_url, caption, retries=3):
                 time.sleep(2)
                 continue
 
-            log.info("✅ Message sent successfully")
+            log.info("✅ Message sent")
             return True
 
         except Exception as e:
             log.error(f"❌ Send error: {e}")
             time.sleep(2)
 
-    log.error("❌ Failed after retries")
     return False
 
 # ================= GET PRODUCTS =================
@@ -141,13 +137,16 @@ def generate_link(product_url):
 
     try:
         res = requests.get(url, params=params, timeout=30).json()
+
         return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
-    except Exception as e:
-        log.error(f"❌ Link error: {e}")
+
+    except:
         return product_url
 
 # ================= FILTER =================
 def pick_product(data):
+    global last_product_id
+
     try:
         products = data["aliexpress_affiliate_product_query_response"]["resp_result"]["result"]["products"]["product"]
 
@@ -157,7 +156,7 @@ def pick_product(data):
             try:
                 pid = p.get("product_id")
 
-                if pid in used_products:
+                if pid == last_product_id:
                     continue
 
                 price = float(p.get("target_sale_price", 0))
@@ -169,13 +168,11 @@ def pick_product(data):
             except:
                 continue
 
-        log.info(f"📊 Found {len(valid)} products")
-
         if not valid:
             return None
 
         product = random.choice(valid)
-        used_products.add(product.get("product_id"))
+        last_product_id = product.get("product_id")
 
         return product
 
@@ -185,18 +182,21 @@ def pick_product(data):
 
 # ================= MAIN =================
 def main():
+    log.info("⏳ Waiting before first post...")
+    time.sleep(POST_INTERVAL)  # ✅ يمنع spam عند restart
+
     while True:
         try:
             log.info("🔄 New cycle")
 
             data = get_products()
             if not data:
-                time.sleep(ERROR_RETRY_DELAY)
+                time.sleep(ERROR_DELAY)
                 continue
 
             product = pick_product(data)
             if not product:
-                time.sleep(ERROR_RETRY_DELAY)
+                time.sleep(ERROR_DELAY)
                 continue
 
             image = product.get("product_main_image_url", "")
@@ -207,8 +207,8 @@ def main():
 
 📦 {product.get("product_title","")[:60]}
 
-💰 السعر: {product.get("target_sale_price")} $
-📈 الطلبات: {product.get("lastest_volume")}
+💰 {product.get("target_sale_price")} $
+📈 {product.get("lastest_volume")} طلب
 
 🚚 شحن للمغرب
 
@@ -219,15 +219,14 @@ def main():
                 success = send_photo(image, caption)
 
                 if not success:
-                    log.warning("⚠️ فشل الإرسال → إعادة المحاولة قريباً")
-                    time.sleep(ERROR_RETRY_DELAY)
+                    time.sleep(ERROR_DELAY)
                     continue
 
             time.sleep(POST_INTERVAL)
 
         except Exception as e:
             log.error(f"🔥 LOOP ERROR: {e}")
-            time.sleep(ERROR_RETRY_DELAY)
+            time.sleep(ERROR_DELAY)
 
 # ================= RUN =================
 if __name__ == "__main__":
