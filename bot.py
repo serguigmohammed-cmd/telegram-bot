@@ -6,7 +6,7 @@ import os
 import logging
 
 # ================= CONFIG =================
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 APP_SECRET = os.getenv("APP_SECRET")
 
 CHAT_ID = "@orodmaroc"
@@ -17,7 +17,7 @@ POST_INTERVAL = 600
 ERROR_DELAY = 30
 
 if not TOKEN:
-    raise Exception("❌ TOKEN missing (add it in Secrets)")
+    raise Exception("❌ TELEGRAM_TOKEN missing in Secrets")
 if not APP_SECRET:
     raise Exception("❌ APP_SECRET missing")
 
@@ -37,6 +37,23 @@ def generate_sign(params):
     return hashlib.md5(sign_str.encode()).hexdigest().upper()
 
 # ================= TELEGRAM =================
+def send_message(text):
+    try:
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={
+                "chat_id": CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML"
+            },
+            timeout=20
+        )
+        return res.status_code == 200
+    except Exception as e:
+        log.error(f"❌ Message error: {e}")
+        return False
+
+
 def send_photo(photo_url, caption, retries=3):
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
@@ -46,9 +63,8 @@ def send_photo(photo_url, caption, retries=3):
 
             img = requests.get(photo_url, timeout=15)
 
-            # 🔥 fallback إذا الصورة ما خداماش
             if img.status_code != 200:
-                log.warning("⚠️ Image failed → sending text only")
+                log.warning("⚠️ Image failed → fallback to text")
                 return send_message(caption)
 
             res = requests.post(
@@ -82,22 +98,6 @@ def send_photo(photo_url, caption, retries=3):
             time.sleep(2)
 
     return False
-
-
-def send_message(text):
-    try:
-        res = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML"
-            },
-            timeout=20
-        )
-        return res.status_code == 200
-    except:
-        return False
 
 # ================= GET PRODUCTS =================
 def get_products():
@@ -154,7 +154,17 @@ def generate_link(product_url):
 
     try:
         res = requests.get(url, params=params, timeout=30).json()
-        return res["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]["promotion_links"]["promotion_link"][0]["promotion_link"]
+
+        return (
+            res
+            .get("aliexpress_affiliate_link_generate_response", {})
+            .get("resp_result", {})
+            .get("result", {})
+            .get("promotion_links", {})
+            .get("promotion_link", [{}])[0]
+            .get("promotion_link", product_url)
+        )
+
     except Exception as e:
         log.error(f"❌ Link error: {e}")
         return product_url
@@ -188,7 +198,6 @@ def pick_product(data):
 
         used_ids.append(product.get("product_id"))
 
-        # 🔥 تنظيف الذاكرة
         if len(used_ids) > 50:
             used_ids.pop(0)
 
@@ -220,18 +229,18 @@ def main():
             image = product.get("product_main_image_url")
             link = generate_link(product.get("product_detail_url"))
 
-            caption = f"""
-🔥 <b>عرض اليوم 🇲🇦</b>
+            title = (product.get("product_title") or "")[:60]
+            price = product.get("target_sale_price")
+            orders = product.get("lastest_volume")
 
-📦 {product.get("product_title")[:60]}
-
-💰 {product.get("target_sale_price")} $
-📈 {product.get("lastest_volume")} طلب
-
-🚚 شحن للمغرب
-
-🛒 <a href="{link}">اشتري الآن</a>
-"""
+            caption = (
+                f"🔥 <b>عرض اليوم 🇲🇦</b>\n\n"
+                f"📦 {title}\n\n"
+                f"💰 {price} $\n"
+                f"📈 {orders} طلب\n\n"
+                f"🚚 شحن للمغرب\n\n"
+                f"🛒 <a href=\"{link}\">اشتري الآن</a>"
+            )
 
             success = send_photo(image, caption)
 
