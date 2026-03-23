@@ -64,6 +64,7 @@ def get_products():
         res = requests.get(url, params=params, timeout=30)
 
         if res.status_code != 200:
+            log.error(f"API HTTP {res.status_code}")
             return None
 
         return res.json()
@@ -95,7 +96,6 @@ def pick_best_product(data):
                 orders = int(p.get("lastest_volume", 0))
                 rating = float(p.get("evaluate_rate", 0))
 
-                # 🔥 فلترة أقوى (منتجات رابحة فقط)
                 if 5 < price < 50 and orders > 1000 and rating >= 4.5:
                     score = orders * rating
                     best.append((score, p))
@@ -103,6 +103,7 @@ def pick_best_product(data):
                 continue
 
         if not best:
+            log.warning("⚠️ No good products found")
             return None
 
         best.sort(reverse=True)
@@ -135,17 +136,24 @@ def generate_link(product_url):
 
         params["sign"] = generate_sign(params)
 
-        res = requests.get(url, params=params, timeout=30).json()
+        res = requests.get(url, params=params, timeout=30)
+        data = res.json()
 
-        return (
-            res
+        link = (
+            data
             .get("aliexpress_affiliate_link_generate_response", {})
             .get("resp_result", {})
             .get("result", {})
             .get("promotion_links", {})
             .get("promotion_link", [{}])[0]
-            .get("promotion_link", product_url)
+            .get("promotion_link")
         )
+
+        if not link:
+            log.error(f"❌ Affiliate link failed: {data}")
+            return product_url
+
+        return link
 
     except Exception as e:
         log.error(f"Link error: {e}")
@@ -179,8 +187,16 @@ def send_message(text):
             data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=20
         )
-        return res.status_code == 200
-    except:
+        data = res.json()
+
+        if not data.get("ok"):
+            log.error(f"❌ Telegram error: {data}")
+            return False
+
+        return True
+
+    except Exception as e:
+        log.error(e)
         return False
 
 
@@ -199,9 +215,13 @@ def send(photo, caption):
                 timeout=20
             )
 
-            if res.status_code == 200:
+            data = res.json()
+
+            if data.get("ok"):
                 log.info("✅ Posted")
                 return True
+            else:
+                log.error(f"❌ Telegram reject: {data}")
 
         except Exception as e:
             log.error(e)
@@ -232,6 +252,7 @@ def main():
             success = send(product.get("product_main_image_url"), caption)
 
             if not success:
+                log.warning("⚠️ Failed to send → retry soon")
                 time.sleep(ERROR_DELAY)
                 continue
 
