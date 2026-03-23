@@ -2,156 +2,124 @@ import pandas as pd
 import requests
 import time
 import random
-import hashlib
 import os
 import logging
+import sys
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-APP_SECRET = os.getenv("APP_SECRET")
-
-APP_KEY = "530184"
-TRACKING_ID = "orodmaroc"
 
 POST_INTERVAL = 1800
+ERROR_DELAY = 60
 MAX_RETRIES = 3
+
+# ✅ FIX: تحقق من التوكن
+if not TOKEN or TOKEN.strip() == "":
+    print("❌ TELEGRAM_TOKEN missing — STOP")
+    sys.exit(1)
+
+if not CHAT_ID:
+    print("❌ TELEGRAM_CHAT_ID missing — STOP")
+    sys.exit(1)
 
 # ================= LOG =================
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
 
-# ================= LOAD FILE =================
+# ================= LOAD CSV =================
 df = pd.read_csv("products.csv")
 
-# ================= SMART FILTER =================
-def filter_products(df):
+# ================= TELEGRAM =================
+def send_message(text):
     try:
-        return df[
-            (df["Orders"] > 1000) &
-            (df["Rating"] >= 4.5) &
-            (df["Price"] > 3) &
-            (df["Price"] < 50)
-        ]
-    except:
-        return df
-
-df = filter_products(df)
-
-# ================= SIGN =================
-def generate_sign(params):
-    sorted_params = dict(sorted(params.items()))
-    s = APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params.items()) + APP_SECRET
-    return hashlib.md5(s.encode()).hexdigest().upper()
-
-# ================= AFFILIATE =================
-def generate_affiliate_link(product_url):
-    try:
-        url = "https://api-sg.aliexpress.com/rest"
-
-        params = {
-            "method": "aliexpress.affiliate.link.generate",
-            "app_key": APP_KEY,
-            "timestamp": str(int(time.time() * 1000)),
-            "format": "json",
-            "v": "2.0",
-            "source_values": product_url,
-            "tracking_id": TRACKING_ID
-        }
-
-        params["sign"] = generate_sign(params)
-
-        res = requests.get(url, params=params, timeout=30)
-        data = res.json()
-
-        link = (
-            data.get("aliexpress_affiliate_link_generate_response", {})
-            .get("resp_result", {})
-            .get("result", {})
-            .get("promotion_links", {})
-            .get("promotion_link", [{}])[0]
-            .get("promotion_link")
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": text},
+            timeout=20
         )
 
-        return link if link else product_url
+        data = res.json()
 
-    except:
-        return product_url
+        if not data.get("ok"):
+            log.error(f"❌ Telegram error: {data}")
+            return False
 
-# ================= CAPTION =================
-def build_caption(title, price, orders, link):
-    return f"""🔥 منتج ترند في المغرب 🇲🇦
+        return True
 
-📦 {title[:60]}
+    except Exception as e:
+        log.error(f"❌ Request error: {e}")
+        return False
 
-💰 فقط {price}$
-📈 +{orders} طلب
 
-⚠️ العرض محدود!
+# ================= RETRY =================
+def send_with_retry(message):
+    for attempt in range(1, MAX_RETRIES + 1):
+        log.info(f"📤 Attempt {attempt}")
 
-🚚 شحن سريع
-
-🛒 اطلب الآن 👇
-{link}
-"""
-
-# ================= TELEGRAM =================
-def send(msg):
-    for _ in range(MAX_RETRIES):
-        try:
-            res = requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                data={"chat_id": CHAT_ID, "text": msg},
-                timeout=20
-            )
-
-            if res.json().get("ok"):
-                return True
-        except:
-            pass
+        if send_message(message):
+            log.info("✅ Sent")
+            return True
 
         time.sleep(5)
 
+    log.error("❌ Failed after retries")
     return False
+
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 PRO BOT STARTED")
+    log.info("🚀 BOT STARTED")
 
-    used = set()
+    used_links = set()
 
     while True:
         try:
             product = df.sample(1).iloc[0]
 
-            pid = product.get("ProductId")
-            if pid in used:
+            title = str(product.get("Product Title", ""))[:70]
+
+            # 🔗 اختيار الرابط الصحيح
+            link = product.get("Promotion Link") or product.get("Product URL")
+
+            if not link:
                 continue
 
-            title = str(product.get("Product Title", ""))
-            price = product.get("Price", "")
-            orders = product.get("Orders", "")
-
-            url = product.get("Product URL")
-            if not url:
+            # ❌ منع روابط xxx
+            if "xxx" in link:
+                log.warning("⚠️ Fake link detected — skip")
                 continue
 
-            link = generate_affiliate_link(url)
+            # ❌ منع التكرار
+            if link in used_links:
+                continue
 
-            msg = build_caption(title, price, orders, link)
+            message = f"""🔥 منتج ترند اليوم 🇲🇦
 
-            if send(msg):
-                log.info("✅ Posted")
-                used.add(pid)
+📦 {title}
 
-                if len(used) > 100:
-                    used.pop()
+⚠️ العرض محدود!
+
+🛒 اطلب الآن 👇
+{link}
+"""
+
+            success = send_with_retry(message)
+
+            if success:
+                used_links.add(link)
+
+                # حافظ على الحجم
+                if len(used_links) > 100:
+                    used_links.pop()
 
             time.sleep(POST_INTERVAL)
 
         except Exception as e:
-            log.error(e)
-            time.sleep(60)
+            log.error(f"🔥 Error: {e}")
+            time.sleep(ERROR_DELAY)
+
 
 # ================= RUN =================
-main()
+if __name__ == "__main__":
+    main()
