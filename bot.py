@@ -22,16 +22,12 @@ ERROR_DELAY = 60
 POST_HOURS = [12, 18, 21]
 
 # ================= VALIDATION =================
-if not TOKEN or TOKEN.strip() == "":
+if not TOKEN:
     print("❌ TELEGRAM_TOKEN missing")
     sys.exit(1)
 
-if not CHAT_ID or CHAT_ID.strip() == "":
+if not CHAT_ID:
     print("❌ TELEGRAM_CHAT_ID missing")
-    sys.exit(1)
-
-if not APP_KEY or not APP_SECRET:
-    print("❌ AliExpress API keys missing")
     sys.exit(1)
 
 # ================= LOG =================
@@ -39,18 +35,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 log = logging.getLogger()
 
 # ================= LOAD CSV =================
-try:
-    df = pd.read_csv("products.csv")
-except Exception as e:
-    log.error(f"CSV error: {e}")
-    sys.exit(1)
+df = pd.read_csv("products.csv")
 
-# ================= AFFILIATE CACHE =================
+# ================= TRACKING =================
+performance = {}
+
+# ================= AFFILIATE =================
 link_cache = {}
 
-def generate_affiliate_link(original_url):
+def generate_affiliate_link(url):
     try:
-        url = "https://api-sg.aliexpress.com/sync"
+        api_url = "https://api-sg.aliexpress.com/sync"
 
         params = {
             "app_key": APP_KEY,
@@ -60,85 +55,94 @@ def generate_affiliate_link(original_url):
             "v": "2.0",
             "sign_method": "md5",
             "promotion_link_type": "0",
-            "source_values": original_url,
+            "source_values": url,
             "tracking_id": TRACKING_ID
         }
 
         sign_str = APP_SECRET + "".join(f"{k}{params[k]}" for k in sorted(params)) + APP_SECRET
-        sign = hashlib.md5(sign_str.encode()).hexdigest().upper()
-        params["sign"] = sign
+        params["sign"] = hashlib.md5(sign_str.encode()).hexdigest().upper()
 
-        res = requests.get(url, params=params, timeout=20)
+        res = requests.get(api_url, params=params, timeout=20)
         data = res.json()
 
-        link = data.get("aliexpress_affiliate_link_generate_response", {}) \
+        return data.get("aliexpress_affiliate_link_generate_response", {}) \
                    .get("resp_result", {}) \
                    .get("result", {}) \
                    .get("promotion_links", [{}])[0] \
                    .get("promotion_link")
 
-        return link
-
-    except Exception as e:
-        log.error(f"Affiliate error: {e}")
+    except:
         return None
 
 
-def get_affiliate_link(url):
+def get_affiliate(url):
     if url in link_cache:
         return link_cache[url]
 
     aff = generate_affiliate_link(url)
-
     if aff:
         link_cache[url] = aff
 
     return aff
 
-# ================= SMART FILTER =================
-def pick_product():
-    for _ in range(30):
-        product = df.sample(1).iloc[0]
+# ================= SMART SCORE =================
+def score_product(p):
+    try:
+        sales = float(p.get("Sales180Day", 0))
+        rating = float(p.get("Positive Feedback", 0))
+        price = float(p.get("Discount Price", 1))
 
-        title = str(product.get("Product Desc", "")).strip()
-        raw_link = product.get("Product URL")
-        image = product.get("Image Url")
+        return (sales * 0.5) + (rating * 20) - price
+    except:
+        return 0
+
+# ================= PICK PRODUCT =================
+def pick_product():
+    df["score"] = df.apply(score_product, axis=1)
+    top = df.sort_values("score", ascending=False).head(50)
+
+    for _ in range(20):
+        p = top.sample(1).iloc[0]
+
+        title = str(p.get("Product Desc", "")).strip()
+        raw_link = p.get("Product URL")
+        image = p.get("Image Url")
 
         if not title or not raw_link or not image:
             continue
 
-        # 🔥 توليد affiliate link
-        link = get_affiliate_link(raw_link)
-
-        if not link:
+        aff = get_affiliate(raw_link)
+        if not aff:
             continue
 
-        return title[:80], link, image
+        if aff in performance:
+            performance[aff] += 1
+            if performance[aff] > 2:
+                continue
+        else:
+            performance[aff] = 1
+
+        return title[:80], aff, image
 
     return None, None, None
 
-# ================= AI CAPTION =================
+# ================= CAPTION =================
 def generate_caption(title, link):
     hooks = [
-        "🔥 عرض اليوم!",
-        "🚀 ترند الآن!",
-        "💥 تخفيض قوي!",
-        "😱 فرصة لا تعوض!",
-        "🛒 الأفضل حالياً!"
-    ]
-
-    ctas = [
-        "اطلب الآن قبل نفاذ الكمية 👇",
-        "سارع قبل انتهاء العرض ⏳",
-        "اضغط وشوف العرض الآن 🔥",
-        "لا تفوّت الفرصة 👇"
+        "🔥 خصم قوي اليوم!",
+        "🚀 منتج عليه إقبال كبير!",
+        "💥 عرض لا يفوّت!",
+        "😱 الناس كاملين كيشريوه!",
+        "🛒 ترند حالياً!"
     ]
 
     return f"""{random.choice(hooks)} 🇲🇦
 
 📦 {title}
 
-{random.choice(ctas)}
+⚠️ الكمية محدودة!
+
+🛒 اطلب الآن 👇
 {link}
 """
 
@@ -147,11 +151,7 @@ def send_photo(photo, caption):
     try:
         res = requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-            data={
-                "chat_id": CHAT_ID,
-                "photo": photo,
-                "caption": caption
-            },
+            data={"chat_id": CHAT_ID, "photo": photo, "caption": caption},
             timeout=20
         )
 
@@ -159,16 +159,13 @@ def send_photo(photo, caption):
 
         if not data.get("ok"):
             if data.get("error_code") == 429:
-                retry = data.get("parameters", {}).get("retry_after", 30)
-                return False, retry
+                return False, data["parameters"]["retry_after"]
 
-            log.error(data)
             return False, None
 
         return True, None
 
-    except Exception as e:
-        log.error(e)
+    except:
         return False, None
 
 # ================= RETRY =================
@@ -184,7 +181,7 @@ def send_with_retry(photo, caption):
     return False
 
 # ================= SCHEDULER =================
-def wait_for_next_post():
+def wait_for_time():
     while True:
         now = datetime.now()
         if now.hour in POST_HOURS and now.minute == 0:
@@ -193,29 +190,26 @@ def wait_for_next_post():
 
 # ================= MAIN =================
 def main():
-    log.info("🚀 PRO BOT WITH AFFILIATE STARTED")
-
-    used_links = set()
+    log.info("💰 MONEY BOT STARTED")
 
     while True:
         try:
-            wait_for_next_post()
+            wait_for_time()
 
             title, link, image = pick_product()
 
-            if not link or link in used_links:
+            if not link:
                 continue
 
             caption = generate_caption(title, link)
 
             if send_with_retry(image, caption):
-                used_links.add(link)
-                log.info("✅ Posted with affiliate link 💰")
+                log.info(f"💸 Posted: {title}")
 
             time.sleep(60)
 
         except Exception as e:
-            log.error(f"Error: {e}")
+            log.error(e)
             time.sleep(ERROR_DELAY)
 
 # ================= RUN =================
