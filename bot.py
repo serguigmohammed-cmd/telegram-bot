@@ -3,32 +3,22 @@ import time
 import os
 import sys
 import random
-import signal
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-POST_INTERVAL = 7200  # 2 hours
-running = True
+POST_INTERVAL = 7200   # 2 hours
+RETRY_DELAY = 60       # retry after failure (1 min)
 
 # ================= VALIDATION =================
 if not TOKEN or TOKEN.strip() == "":
-    print("❌ ERROR: TELEGRAM_TOKEN missing — stopping")
+    print("❌ ERROR: TELEGRAM_TOKEN missing — bot stopped")
     sys.exit(1)
 
 if not CHAT_ID or CHAT_ID.strip() == "":
-    print("❌ ERROR: TELEGRAM_CHAT_ID missing — stopping")
+    print("❌ ERROR: TELEGRAM_CHAT_ID missing — bot stopped")
     sys.exit(1)
-
-# ================= SIGNAL HANDLER =================
-def shutdown_handler(signum, frame):
-    global running
-    print("🛑 Shutdown signal received — stopping bot cleanly...")
-    running = False
-
-signal.signal(signal.SIGINT, shutdown_handler)
-signal.signal(signal.SIGTERM, shutdown_handler)
 
 # ================= POSTS =================
 posts = [
@@ -37,9 +27,7 @@ posts = [
     "🚀 منتج مطلوب بشدة!\nhttps://s.click.aliexpress.com/e/xxx"
 ]
 
-# 🔁 Shuffle once
-random.shuffle(posts)
-post_index = 0
+last_post = None
 
 # ================= TELEGRAM =================
 def send_message(text):
@@ -69,38 +57,39 @@ def send_message(text):
 
 # ================= MAIN =================
 def main():
-    global post_index
+    global last_post
 
-    print("🚀 Bot started (Stable Mode)")
+    print("🚀 Bot started (Improved Version)")
 
-    while running:
+    while True:
         try:
-            message = posts[post_index]
+            # 🔁 منع التكرار
+            available_posts = [p for p in posts if p != last_post]
+
+            if not available_posts:
+                available_posts = posts
+
+            message = random.choice(available_posts)
 
             # ⚠️ منع الروابط الوهمية
             if "xxx" in message:
-                print("⚠️ Placeholder link detected — skipping post")
-                post_index = (post_index + 1) % len(posts)
+                print("⚠️ Placeholder link detected — skipping")
+                time.sleep(30)
                 continue
 
             success = send_message(message)
 
             if success:
-                print(f"✅ Sent post #{post_index + 1}")
-
-                post_index += 1
-
-                if post_index >= len(posts):
-                    random.shuffle(posts)
-                    post_index = 0
-
-            time.sleep(POST_INTERVAL)
+                print("✅ Message sent")
+                last_post = message
+                time.sleep(POST_INTERVAL)
+            else:
+                print("⚠️ Failed — retrying soon")
+                time.sleep(RETRY_DELAY)
 
         except Exception as e:
             print(f"🔥 Error: {e}")
-            time.sleep(60)
-
-    print("👋 Bot stopped cleanly")
+            time.sleep(RETRY_DELAY)
 
 
 # ================= RUN =================
